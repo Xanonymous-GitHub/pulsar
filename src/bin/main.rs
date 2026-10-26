@@ -8,6 +8,7 @@
 #![deny(clippy::large_stack_frames)]
 
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::main;
 use esp_hal::time::{Duration, Instant};
 use log::{error, info};
@@ -34,7 +35,7 @@ fn main() -> ! {
     esp_println::logger::init_logger_from_env();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
-    let _peripherals = esp_hal::init(config);
+    let peripherals = esp_hal::init(config);
 
     let count = 10;
 
@@ -45,8 +46,13 @@ fn main() -> ! {
     }
 
     info!("Done, idling.");
+
+    let mut led = Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default());
+
     loop {
-        core::hint::spin_loop();
+        led.toggle();
+        let delay_start = Instant::now();
+        while delay_start.elapsed() < Duration::from_millis(100) {}
     }
 
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.2.2/examples
