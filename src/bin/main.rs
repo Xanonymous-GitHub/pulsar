@@ -36,10 +36,17 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let _peripherals = esp_hal::init(config);
 
-    loop {
-        info!("Hello world!");
+    let count = 10;
+
+    for i in 0..count {
+        info!("Hello world! (iteration {})", i);
         let delay_start = Instant::now();
         while delay_start.elapsed() < Duration::from_millis(500) {}
+    }
+
+    info!("Done, idling.");
+    loop {
+        core::hint::spin_loop();
     }
 
     // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.2.2/examples
