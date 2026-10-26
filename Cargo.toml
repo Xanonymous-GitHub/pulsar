@@ -18,6 +18,9 @@ log                    = "0.4.34"
 critical-section = "1.2.0"
 esp-println      = { version = "0.18.0", features = ["esp32c5", "log-04"] }
 
+embedded-graphics = "0.8.2"
+ssd1306           = "0.10.0"
+
 
 # For fine-tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
 [profile.dev]
