@@ -7,15 +7,11 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
+use esp_hal::gpio::{Level, Output, OutputConfig};
 use esp_hal::main;
-use esp_hal::rmt::Rmt;
-use esp_hal::time::{Duration, Instant, Rate};
-use esp_hal_smartled::{RmtSmartLeds, WS2812_TIMING, buffer_size, color_order};
+use esp_hal::time::{Duration, Instant};
 use log::{error, info};
-use smart_leds::colors::{BLUE, GREEN, RED};
-use smart_leds::{RGB8, SmartLedsWrite, brightness};
 
 #[panic_handler]
 fn panic(panic_info: &core::panic::PanicInfo) -> ! {
@@ -51,23 +47,10 @@ fn main() -> ! {
 
     info!("Done, idling.");
 
-    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80)).unwrap();
-    const LED_BUFFER_SIZE: usize = buffer_size::<RGB8>(1);
-    let mut led = RmtSmartLeds::<LED_BUFFER_SIZE, Blocking, RGB8, color_order::Rgb>::new(
-        WS2812_TIMING,
-        rmt.channel0,
-        peripherals.GPIO27,
-        Rate::from_mhz(80),
-    )
-    .unwrap();
-
-    let colors = [RED, GREEN, BLUE];
-    let mut next = 0;
+    let mut led = Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default());
 
     loop {
-        led.write(brightness([colors[next]].into_iter(), 10))
-            .unwrap();
-        next = (next + 1) % colors.len();
+        led.toggle();
         let delay_start = Instant::now();
         while delay_start.elapsed() < Duration::from_millis(100) {}
     }
