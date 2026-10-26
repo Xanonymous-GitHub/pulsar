@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # rust-toolchain.toml pins a macOS host toolchain. This overrides it on Linux runners.
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain
+        run: rustup component add rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain
+        run: |
+          rustup target add riscv32imac-unknown-none-elf
+          rustup component add clippy rust-src
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-clippy-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-clippy-${{ runner.os }}-
+      - run: cargo clippy --locked -- -D warnings
+
+  build:
+    name: Build (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [dev, release]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain
+        run: |
+          rustup target add riscv32imac-unknown-none-elf
+          rustup component add rust-src
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-build-${{ matrix.profile }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-build-${{ matrix.profile }}-${{ runner.os }}-
+      - run: cargo build --locked --profile ${{ matrix.profile }}
+      - name: Upload firmware
+        if: matrix.profile == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pulsar-firmware
+          path: target/riscv32imac-unknown-none-elf/release/pulsar
