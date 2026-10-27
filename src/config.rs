@@ -8,8 +8,9 @@ pub const LED_PERIOD: Duration = Duration::from_millis(100);
 /// Stack size of the LED thread, in bytes.
 pub const LED_STACK_BYTES: usize = 2 * 1024;
 
-/// The text that scrolls on the OLED. Only ASCII is supported by the built-in font.
-pub const SCROLL_TEXT: &str = "Hello from ESP32-C5!";
+/// The text that scrolls on the OLED until the first weather report arrives. Only ASCII is
+/// supported by the built-in font.
+pub const SCROLL_PLACEHOLDER: &str = "Fetching weather...";
 
 /// Pixels the scrolling text moves on every frame.
 pub const SCROLL_STEP: i32 = 2;
@@ -62,6 +63,30 @@ pub const CLOCK_VALID_AFTER: Duration = Duration::from_hours(490_896);
 /// daylight saving time since 1979, so a fixed offset is exact. A zone with daylight saving time
 /// would need a time zone database instead.
 pub const LOCAL_UTC_OFFSET: Duration = Duration::from_hours(8);
+
+/// Where the weather comes from: the free Open-Meteo forecast API (no key, HTTPS), asked for the
+/// current conditions and today's range at the coordinates of Taipei, in Taipei local time.
+pub const WEATHER_URL: &str = "https://api.open-meteo.com/v1/forecast?latitude=25.05&longitude=121.53&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTaipei&forecast_days=1";
+
+/// The place name shown in front of the weather report. It has to match [`WEATHER_URL`].
+pub const WEATHER_PLACE: &str = "Taipei";
+
+/// Time between two successful weather updates.
+pub const WEATHER_REFRESH: Duration = Duration::from_mins(15);
+
+/// Wait before trying again after a failed weather update. It doubles after every further
+/// failure up to [`WEATHER_RETRY_MAX`].
+pub const WEATHER_RETRY: Duration = Duration::from_secs(30);
+
+/// Longest wait between two weather updates while they keep failing.
+pub const WEATHER_RETRY_MAX: Duration = Duration::from_mins(5);
+
+/// A report older than this is shown with `(old)` in front, so a long outage is not mistaken for
+/// current weather. It is a bit more than two missed updates.
+pub const WEATHER_STALE_AFTER: Duration = Duration::from_mins(35);
+
+/// Stack size of the weather thread, in bytes. The TLS handshake needs most of it.
+pub const WEATHER_STACK_BYTES: usize = 16 * 1024;
 
 /// How long an HTTP request may wait for network data (connect, send or receive) before it fails.
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15);

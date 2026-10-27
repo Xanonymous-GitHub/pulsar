@@ -4,11 +4,12 @@ use anyhow::Result;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use pulsar::{
     board::Board,
-    clock, led,
+    clock, config, led,
+    message::SharedMessage,
     secrets::SecretStore,
     status::{LinkState, SharedStatus},
     ui::Screen,
-    wifi,
+    weather, wifi,
 };
 
 /// Opens the secret store. It may be unavailable (for example while flash encryption is off).
@@ -35,11 +36,12 @@ fn main() -> Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let status = SharedStatus::default();
+    let message = SharedMessage::new(config::SCROLL_PLACEHOLDER);
     let board = Board::take()?;
     let sysloop = EspSystemEventLoop::take()?;
 
     led::spawn(board.led)?;
-    Screen::new(board.display_i2c, status.clone())?.spawn()?;
+    Screen::new(board.display_i2c, status.clone(), message.clone())?.spawn()?;
 
     // Wi-Fi needs its credentials from the store. If they are missing, the rest of the firmware
     // keeps running and the screen says why.
@@ -49,9 +51,13 @@ fn main() -> Result<()> {
         .and_then(|credentials| wifi::start(board.modem, sysloop, &credentials, status.clone()));
     match started {
         // The network stack exists now, so SNTP can start. It waits for the connection by itself.
+        // The weather thread waits for an address, then fetches the forecast over HTTPS.
         Ok(()) => {
             if let Err(error) = clock::start() {
                 log::error!("clock not started: {error}");
+            }
+            if let Err(error) = weather::spawn(status.clone(), message.clone()) {
+                log::error!("weather not started: {error}");
             }
         }
         Err(error) => {

@@ -1155,6 +1155,8 @@ dependencies = [
  "esp-idf-svc",
  "heapless",
  "log",
+ "serde",
+ "serde_json",
  "ssd1306",
  "thiserror 2.0.21",
  "zeroize",

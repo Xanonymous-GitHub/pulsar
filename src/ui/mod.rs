@@ -1,7 +1,8 @@
-//! The OLED: a Wi-Fi status bar on top and a scrolling message below.
+//! The OLED: a status bar (Wi-Fi and the local time) on top and a scrolling message below.
 //!
 //! [`Screen`] owns the display and a thread that redraws it at a fixed rate. It reads the Wi-Fi
-//! state from a [`SharedStatus`]; it never talks to the network code directly.
+//! state from a [`SharedStatus`], the scrolling text from a [`SharedMessage`] and the time from
+//! [`clock`]; it never talks to the network code directly.
 
 pub mod scroll;
 pub mod status_bar;
@@ -22,9 +23,9 @@ use ssd1306::mode::{BufferedGraphicsMode, DisplayConfig};
 use ssd1306::prelude::*;
 use ssd1306::{I2CDisplayInterface, Ssd1306};
 
-use crate::config::{
-    FRAME_PERIOD, SCREEN_STACK_BYTES, SCROLL_STEP, SCROLL_TEXT, STATUS_BAR_HEIGHT,
-};
+use crate::clock;
+use crate::config::{FRAME_PERIOD, SCREEN_STACK_BYTES, SCROLL_STEP, STATUS_BAR_HEIGHT};
+use crate::message::SharedMessage;
 use crate::status::SharedStatus;
 use scroll::ScrollingText;
 use status_bar::StatusBar;
@@ -57,8 +58,11 @@ impl From<DisplayError> for Error {
 pub struct Screen {
     display: Display,
     bar: StatusBar,
-    scroller: ScrollingText<'static>,
+    scroller: ScrollingText,
     status: SharedStatus,
+    message: SharedMessage,
+    /// The generation of the message that is on the screen, see [`SharedMessage::take_update`].
+    message_generation: u64,
 }
 
 impl Screen {
@@ -67,7 +71,11 @@ impl Screen {
     /// # Errors
     ///
     /// Fails if the display does not answer.
-    pub fn new(i2c: I2cDriver<'static>, status: SharedStatus) -> Result<Self, Error> {
+    pub fn new(
+        i2c: I2cDriver<'static>,
+        status: SharedStatus,
+        message: SharedMessage,
+    ) -> Result<Self, Error> {
         let mut display = Ssd1306::new(
             I2CDisplayInterface::new(i2c),
             DisplaySize128x64,
@@ -79,12 +87,12 @@ impl Screen {
         Ok(Self {
             display,
             bar: StatusBar::new(),
-            scroller: ScrollingText::new(
-                SCROLL_TEXT,
-                MonoTextStyle::new(&FONT_10X20, BinaryColor::On),
-            )
-            .with_step(SCROLL_STEP),
+            // The text itself arrives with the first frame.
+            scroller: ScrollingText::new("", MonoTextStyle::new(&FONT_10X20, BinaryColor::On))
+                .with_step(SCROLL_STEP),
             status,
+            message,
+            message_generation: 0,
         })
     }
 
@@ -122,9 +130,15 @@ impl Screen {
             AnchorY::Bottom,
         );
 
+        if let Some(text) = self.message.take_update(&mut self.message_generation) {
+            self.scroller.set_text(text);
+        }
+        let time = clock::local_time().map(|time| time.to_string());
+
         self.display.clear(BinaryColor::Off)?;
         self.bar.draw(
             &self.status.snapshot(),
+            time.as_deref(),
             &mut self.display.cropped(&bar_area),
         )?;
         self.scroller

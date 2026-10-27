@@ -23,8 +23,8 @@ use embedded_graphics::text::{Baseline, Text};
 const DEFAULT_GAP: i32 = 16;
 
 /// A string that scrolls horizontally, vertically centered on the draw target.
-pub struct ScrollingText<'a> {
-    text: &'a str,
+pub struct ScrollingText {
+    text: String,
     style: MonoTextStyle<'static, BinaryColor>,
     /// How far the tape has moved to the left, always in `0..period`.
     offset: i32,
@@ -34,12 +34,12 @@ pub struct ScrollingText<'a> {
     gap: i32,
 }
 
-impl<'a> ScrollingText<'a> {
+impl ScrollingText {
     /// Creates a scroller that moves 1 pixel per `advance` with a 16 pixel gap.
     #[must_use]
-    pub const fn new(text: &'a str, style: MonoTextStyle<'static, BinaryColor>) -> Self {
+    pub fn new(text: impl Into<String>, style: MonoTextStyle<'static, BinaryColor>) -> Self {
         Self {
-            text,
+            text: text.into(),
             style,
             offset: 0,
             step: 1,
@@ -63,8 +63,8 @@ impl<'a> ScrollingText<'a> {
     }
 
     /// Replaces the text and restarts the scroll from the beginning.
-    pub fn set_text(&mut self, text: &'a str) {
-        self.text = text;
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.text = text.into();
         self.offset = 0;
     }
 
@@ -114,7 +114,7 @@ impl<'a> ScrollingText<'a> {
         // The copy before it ends before the edge, so it never needs drawing.
         let mut x = left - self.offset;
         while x < right {
-            Text::with_baseline(self.text, Point::new(x, y), self.style, Baseline::Middle)
+            Text::with_baseline(&self.text, Point::new(x, y), self.style, Baseline::Middle)
                 .draw(target)?;
             x += period;
         }

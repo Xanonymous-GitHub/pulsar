@@ -1,4 +1,4 @@
-//! The Wi-Fi status bar: two lines of text (network, signal) and signal bars.
+//! The status bar: two lines of text (network and clock, signal) and signal bars.
 //!
 //! Like [`ScrollingText`](super::scroll::ScrollingText) it draws onto any [`DrawTarget`], so it
 //! knows nothing about the display hardware.
@@ -24,7 +24,10 @@ const BAR_GAP: u32 = 2;
 /// Height of the smallest bar; each further bar is this much taller.
 const BAR_STEP: u32 = 2;
 
-/// Draws a [`WifiStatus`] into the area it is given.
+/// Characters of the clock text (`HH:MM:SS`).
+const CLOCK_CHARS: usize = 8;
+
+/// Draws a [`WifiStatus`] and the time into the area it is given.
 pub struct StatusBar {
     text: MonoTextStyle<'static, BinaryColor>,
 }
@@ -38,27 +41,42 @@ impl StatusBar {
         }
     }
 
-    /// Draws `status` onto `target`, starting at its top left corner.
+    /// Draws `status` onto `target`, starting at its top left corner. `time` is the local time
+    /// of day (`HH:MM:SS`) shown at the right of the first line, or `None` until the clock is set.
     ///
     /// # Errors
     ///
     /// Returns the error of `target` if drawing fails.
-    pub fn draw<D>(&self, status: &WifiStatus, target: &mut D) -> Result<(), D::Error>
+    pub fn draw<D>(
+        &self,
+        status: &WifiStatus,
+        time: Option<&str>,
+        target: &mut D,
+    ) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = BinaryColor>,
     {
         let mut line = heapless::String::<LINE_CHARS>::new();
 
-        // Line 1: the network name, or a placeholder until it is known.
+        // Line 1: the network name, or a placeholder until it is known. With a clock the name
+        // gets less room (the clock plus one space is left out).
+        let name_chars = if time.is_some() {
+            LINE_CHARS - CLOCK_CHARS - 1
+        } else {
+            LINE_CHARS
+        };
         if status.ssid.is_empty() {
             let _ = line.push_str("Wi-Fi");
         } else {
-            // Names longer than the line are cut (by characters, not bytes).
-            for character in status.ssid.chars().take(LINE_CHARS) {
+            // Names longer than the room are cut (by characters, not bytes).
+            for character in status.ssid.chars().take(name_chars) {
                 let _ = line.push(character);
             }
         }
         self.print(&line, 0, target)?;
+        if let Some(time) = time {
+            self.print_right(time, 0, target)?;
+        }
 
         // Line 2: signal and band, or what the link is doing.
         line.clear();
@@ -97,6 +115,20 @@ impl StatusBar {
             draw_bars(status.rssi_dbm.map_or(0, signal_bars), target)?;
         }
         Ok(())
+    }
+
+    /// Prints `text` so that it ends at the right edge of `target`.
+    fn print_right<D>(&self, text: &str, y: i32, target: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = BinaryColor>,
+    {
+        let width = i32::try_from(text.chars().count())
+            .unwrap_or(0)
+            .saturating_mul(self.text.font.character_size.width.cast_signed());
+        let right = target.bounding_box().size.width.cast_signed();
+        Text::with_baseline(text, Point::new(right - width, y), self.text, Baseline::Top)
+            .draw(target)
+            .map(drop)
     }
 
     fn print<D>(&self, text: &str, y: i32, target: &mut D) -> Result<(), D::Error>
