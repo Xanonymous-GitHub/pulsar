@@ -11,10 +11,12 @@
 //! - [`ui`]: the OLED (status bar and scrolling message).
 //! - [`wifi`]: joining a WPA3 network.
 //! - [`clock`]: the wall clock, set with SNTP (TLS needs it).
+//! - [`http`]: an HTTP/HTTPS client (HTTP/1.1, TLS 1.3).
 
 pub mod board;
 pub mod clock;
 pub mod config;
+pub mod http;
 pub mod led;
 pub mod platform;
 pub mod secrets;

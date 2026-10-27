@@ -62,3 +62,21 @@ pub const CLOCK_VALID_AFTER: Duration = Duration::from_hours(490_896);
 /// daylight saving time since 1979, so a fixed offset is exact. A zone with daylight saving time
 /// would need a time zone database instead.
 pub const LOCAL_UTC_OFFSET: Duration = Duration::from_hours(8);
+
+/// How long an HTTP request may wait for network data (connect, send or receive) before it fails.
+pub const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Receive buffer of the HTTP client, in bytes. It also limits the longest single response header
+/// (long `Set-Cookie` or `Content-Security-Policy` headers do not fit in the 512-byte default).
+pub const HTTP_RX_BUFFER_BYTES: usize = 4 * 1024;
+
+/// Send buffer of the HTTP client, in bytes. It limits the request line plus all request headers.
+pub const HTTP_TX_BUFFER_BYTES: usize = 2 * 1024;
+
+/// The most bytes `Response::bytes` and `Response::text` read into memory. Stream larger bodies
+/// with `std::io::Read` instead.
+pub const HTTP_MAX_BODY_BYTES: usize = 64 * 1024;
+
+/// How long an HTTPS request waits for the clock to be set before it gives up. Certificates cannot
+/// be checked while the clock still shows 1970.
+pub const HTTP_CLOCK_WAIT: Duration = Duration::from_secs(30);

@@ -6,6 +6,7 @@ What it does:
 
 - Joins a **WPA3-Personal** Wi-Fi network on **2.4 GHz or 5 GHz** (Wi-Fi 6 is allowed on both bands). It prefers 5 GHz when that signal is within 10 dB of the best 2.4 GHz one (`WIFI_PREFER_5GHZ_MARGIN_DB` in `src/config.rs`), and uses 2.4 GHz otherwise. The device name on the network is `pulsar`.
 - Shows the SSID, signal strength, band and a signal-bar icon on the 0.96" OLED, with a scrolling text under it.
+- Has a general HTTP/HTTPS client (`src/http.rs`): HTTP/1.1 with TLS 1.3 (TLS 1.2 as a fallback), the Mozilla root certificates and certificate date checks. HTTP/2 and HTTP/3 are not available in ESP-IDF.
 - Blinks the user LED.
 - Keeps the Wi-Fi password in an encrypted NVS partition. See [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md).
 
@@ -73,6 +74,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/secrets.rs` | The encrypted secret store on top of NVS. |
 | `src/status.rs` | The Wi-Fi status shared between Wi-Fi and the screen. |
 | `src/clock.rs` | SNTP and the local time of day. |
+| `src/http.rs` | The HTTP/HTTPS client. |
 | `src/ui/` | The screen: status bar and scrolling text. |
 | `src/led.rs` | The blinking LED. |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
