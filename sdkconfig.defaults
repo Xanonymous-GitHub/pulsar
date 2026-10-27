@@ -1,0 +1,15 @@
+# ESP-IDF settings for development builds. Picked up through ESP_IDF_SDKCONFIG_DEFAULTS in
+# .cargo/config.toml. Security features that burn eFuses (flash encryption, secure boot) are NOT
+# here on purpose: see sdkconfig.defaults.secure and docs/secure-wifi-secrets.md.
+
+# The partition table is NOT set here: esp-idf-sys would not use it. partitions.csv is applied when
+# flashing (`espflash flash --partition-table partitions.csv`, see the runner in .cargo/config.toml).
+
+# Smaller binary.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Rust's std needs a bigger main task stack than the 3.5 KB default.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
+
+# 1 ms tick, so std::thread::sleep is accurate.
+CONFIG_FREERTOS_HZ=1000

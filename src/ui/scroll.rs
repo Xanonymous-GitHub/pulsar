@@ -36,6 +36,7 @@ pub struct ScrollingText<'a> {
 
 impl<'a> ScrollingText<'a> {
     /// Creates a scroller that moves 1 pixel per `advance` with a 16 pixel gap.
+    #[must_use]
     pub const fn new(text: &'a str, style: MonoTextStyle<'static, BinaryColor>) -> Self {
         Self {
             text,
@@ -48,12 +49,14 @@ impl<'a> ScrollingText<'a> {
 
     /// Sets how many pixels the text moves on each `advance`.
     /// A negative value scrolls the other way.
+    #[must_use]
     pub const fn with_step(mut self, step: i32) -> Self {
         self.step = step;
         self
     }
 
     /// Sets the number of blank pixels between two repeats of the text.
+    #[must_use]
     pub const fn with_gap(mut self, gap: i32) -> Self {
         self.gap = gap;
         self
@@ -66,10 +69,12 @@ impl<'a> ScrollingText<'a> {
     }
 
     /// Width of one copy of the text, in pixels.
+    #[must_use]
     pub fn text_width(&self) -> i32 {
         let font = self.style.font;
-        let glyph_width = (font.character_size.width + font.character_spacing) as i32;
-        self.text.chars().count() as i32 * glyph_width
+        let glyph_width = (font.character_size.width + font.character_spacing).cast_signed();
+        let glyphs = i32::try_from(self.text.chars().count()).unwrap_or(i32::MAX);
+        glyphs.saturating_mul(glyph_width)
     }
 
     /// Distance between the start of one copy of the text and the next.
@@ -87,6 +92,10 @@ impl<'a> ScrollingText<'a> {
     ///
     /// The caller is responsible for clearing the target first and for
     /// flushing it afterwards if it is buffered.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of `target` if drawing fails.
     pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
     where
         D: DrawTarget<Color = BinaryColor>,
@@ -97,7 +106,7 @@ impl<'a> ScrollingText<'a> {
 
         let bounds = target.bounding_box();
         let left = bounds.top_left.x;
-        let right = left + bounds.size.width as i32;
+        let right = left + bounds.size.width.cast_signed();
         let y = bounds.center().y;
         let period = self.period();
 

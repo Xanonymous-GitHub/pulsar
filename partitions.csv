@@ -1,9 +1,10 @@
-# Name,    Type, SubType,   Offset, Size,    Flags
-# Flashed by `cargo run` (see the runner in .cargo/config.toml).
-#
-# 'secrets' holds the secret store (src/secret_store.rs). It MUST use the 'undefined' subtype
-# (esp-bootloader-esp-idf cannot parse custom subtypes) and MUST have the 'encrypted' flag.
-nvs,       data, nvs,       ,       0x6000,
-phy_init,  data, phy,       ,       0x1000,
-secrets,   data, undefined, ,       0x1000,  encrypted
-factory,   app,  factory,   ,       3M,
+# Name,    Type, SubType,  Offset,  Size,   Flags
+# 'nvs' is ESP-IDF's own storage (Wi-Fi calibration, ...).
+# 'secrets' is the encrypted NVS partition of src/secrets.rs. Do NOT flag it 'encrypted': NVS
+#   encrypts its own data. 'nvs_keys' holds that NVS encryption key and MUST be flagged
+#   'encrypted', so flash encryption (sdkconfig.defaults.secure) protects it.
+nvs,       data, nvs,      0x9000,  0x6000,
+secrets,   data, nvs,      0xf000,  0x4000,
+nvs_keys,  data, nvs_keys, 0x13000, 0x1000, encrypted
+phy_init,  data, phy,      0x14000, 0x1000,
+factory,   app,  factory,  0x20000, 3M,

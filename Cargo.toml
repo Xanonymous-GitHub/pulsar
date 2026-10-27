@@ -1,61 +1,52 @@
 [package]
-edition      = "2024"
 name         = "pulsar"
-rust-version = "1.99"
 version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.99"
+description  = "My firmware for the XIAO ESP32-C5 (ESP-IDF, std)"
 
 [[bin]]
-name = "pulsar"
-path = "./src/bin/main.rs"
-
-[dependencies]
-esp-hal = { version = "~1.2.2", features = ["esp32c5", "log-04"] }
-
-
-esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c5", "log-04"] }
-log                    = "0.4.34"
-
-critical-section = "1.2.0"
-esp-println      = { version = "0.18.0", features = ["esp32c5", "log-04"] }
-
-embedded-graphics = "0.8.2"
-ssd1306           = "0.10.0"
-
-# Wi-Fi needs a heap and a preemptive scheduler. esp-rtos' `embassy` feature also gives us the async executor.
-esp-alloc       = { version = "0.11.0", features = ["esp32c5"] }
-esp-radio       = { version = "1.0.0-beta.1", features = ["esp32c5", "wifi"] }
-esp-rtos        = { version = "0.4.0", features = ["esp32c5", "esp-radio", "esp-alloc", "embassy"] }
-embassy-executor = "0.10"
-embassy-sync     = "0.8"
-embassy-time     = "0.5"
-
-# TCP/IP stack on top of the Wi-Fi station interface (DHCP only for now).
-embassy-net = { version = "0.9", features = ["dhcpv4", "medium-ethernet", "proto-ipv4"] }
-static_cell = "2"
-
-# Encrypted flash access for the secret store (src/secret_store.rs).
-esp-storage = { version = "0.10.0", features = ["esp32c5"] }
+name    = "pulsar"
+path    = "src/main.rs"
+harness = false # no built-in test harness on the device
 
 [features]
-# Lets the secret store work WITHOUT flash encryption (secrets end up in plain text, with a loud
-# warning at boot). For testing before flash encryption is enabled. Never use it for real secrets.
+# Lets the secret store work WITHOUT flash/NVS encryption (secrets end up in plain text, with a loud
+# warning at boot). For testing before encryption is enabled. Never use it for real secrets.
 insecure-dev-store = []
 
-# The radio blobs only work with optimization level 2 or 3 (see the esp-radio docs).
-[profile.dev.package.esp-radio]
-opt-level = 3
+[dependencies]
+anyhow            = "1.0.104"
+display-interface = "0.5.0"
+embedded-graphics = "0.8.2"
+esp-idf-svc       = "0.53.0"
+heapless          = { version = "0.9.3", features = ["zeroize"] }
+# `max_level_info` removes debug/trace logging from the binary, so a debug line inside a
+# dependency can never print a Wi-Fi configuration.
+log               = { version = "0.4.34", features = ["max_level_info"] }
+ssd1306           = "0.10.0"
+thiserror         = "2.0.21"
+zeroize           = "1.9.1"
 
-[profile.release.package.esp-radio]
-opt-level = 3
+[build-dependencies]
+embuild = "0.33.7"
 
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
 
-# For fine-tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+
 [profile.dev]
-# The default debug profile is too slow and too big for resource-constrained devices.
-# Always build with some optimizations enabled.
+# The default debug profile is too slow and too big for a microcontroller.
 opt-level = "s"
+debug = true # symbols do not increase the size on flash
 
 [profile.release]
-codegen-units = 1     # LLVM can perform better optimizations using a single thread
-lto           = 'fat'
-opt-level     = 'z'
+opt-level     = "z"
+lto           = "fat"
+codegen-units = 1
+panic         = "abort"

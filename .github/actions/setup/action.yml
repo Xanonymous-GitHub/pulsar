@@ -1,0 +1,43 @@
+name: Set up the ESP-IDF Rust toolchain
+description: Installs the pinned nightly, ldproxy and the host packages that ESP-IDF needs, and restores the caches.
+
+inputs:
+  cache-key:
+    description: Name that separates the build cache (target/) of one job from another.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # The ubuntu runner image already has git, cmake, ninja and python3.
+    - name: Install host packages
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          flex bison gperf python3-venv ccache libffi-dev libssl-dev libusb-1.0-0
+    # rust-toolchain.toml pins the nightly and lists its components.
+    - name: Install the pinned toolchain
+      shell: bash
+      run: rustup toolchain install
+    # ESP-IDF v6.1 and its tools (~1 GB download). Shared by every job; it only changes when the
+    # ESP-IDF version or the sdkconfig defaults change, so it is rarely rebuilt.
+    - uses: actions/cache@v6
+      with:
+        path: .embuild
+        key: embuild-${{ runner.os }}-${{ hashFiles('.cargo/config.toml', 'rust-toolchain.toml', 'sdkconfig.defaults') }}
+    # Compiled dependencies and the ESP-IDF C build. Keyed on Cargo.lock only, so source edits
+    # reuse it and cargo rebuilds just this crate.
+    - uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          ~/.cargo/bin/ldproxy
+          target
+        key: ${{ inputs.cache-key }}-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'sdkconfig.defaults') }}
+        restore-keys: ${{ inputs.cache-key }}-${{ runner.os }}-
+    - name: Install ldproxy
+      shell: bash
+      run: command -v ldproxy || cargo install ldproxy --locked

@@ -1,4 +1,6 @@
 [toolchain]
-channel    = "stable-aarch64-apple-darwin"
-components = ["rust-src"]
-targets = ["riscv32imac-unknown-none-elf"]
+# `riscv32imac-esp-espidf` is a tier 3 target: it needs nightly and a `build-std` of the standard library.
+# Pinned to the newest nightly whose `std` builds for it: from nightly-2026-10-20 on, `std` reads
+# `libc::stat.st_atime` while libc 0.2.191 only has `st_atim` for ESP-IDF. Move this forward when that is fixed.
+channel    = "nightly-2026-10-19"
+components = ["rust-src", "clippy", "rustfmt"]

@@ -1,0 +1,19 @@
+# Secure overlay: turns ON flash encryption so the secret store is protected. Applied ONLY by you,
+# on purpose. Building with it changes nothing on the chip, but the FIRST BOOT of the resulting
+# firmware burns eFuses, which is permanent. Read docs/secure-wifi-secrets.md before using it.
+#
+# Use it as a second file after the development defaults (see the guide for the full command):
+#   ESP_IDF_SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.secure"
+
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+
+# DEVELOPMENT mode still allows a limited number of plaintext re-flashes, so a mistake is
+# recoverable. Switch to RELEASE (comment the first line, uncomment the second) only when the
+# device is finished: RELEASE forbids plaintext flashing for good.
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
+# CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
+
+# Deliberately NOT set: CONFIG_NVS_ENCRYPTION. On this chip it would make the default NVS scheme
+# "HMAC", and the first nvs_flash_init() would burn an HMAC key into an eFuse block on its own.
+# src/secrets.rs does not need it: it encrypts its own partition with the keys kept in the
+# `nvs_keys` partition, and flash encryption protects that partition.

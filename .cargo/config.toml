@@ -1,10 +1,18 @@
-[target.riscv32imac-unknown-none-elf]
+[build]
+target = "riscv32imac-esp-espidf"
+
+[target.riscv32imac-esp-espidf]
+linker = "ldproxy"
 # Run `cargo run` from the project root: partitions.csv is resolved relative to the current directory.
-runner = "espflash flash --monitor --chip esp32c5 --partition-table partitions.csv"
+runner = "espflash flash --monitor --partition-table partitions.csv"
+rustflags = ["--cfg", "espidf_time64"]
+
+[unstable]
+build-std = ["std", "panic_abort"]
 
 [env]
-ESP_LOG = "info"
-
-[build]
-rustflags = ["-C", "force-frame-pointers"]
-target = "riscv32imac-unknown-none-elf"
+MCU = "esp32c5"
+# esp-idf-sys downloads this ESP-IDF version and its toolchain into the gitignored `.embuild/` folder.
+ESP_IDF_VERSION = "v6.1"
+ESP_IDF_TOOLS_INSTALL_DIR = "workspace"
+ESP_IDF_SDKCONFIG_DEFAULTS = "sdkconfig.defaults"

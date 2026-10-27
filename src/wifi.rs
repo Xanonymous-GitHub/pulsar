@@ -1,215 +1,177 @@
-//! Join a WPA2 Wi-Fi network and get an IPv4 address (DHCP), with the password kept in the
-//! [`secret_store`](crate::secret_store).
-//!
-//! # Using it from `main`
+//! Join a WPA3 Wi-Fi network (2.4 GHz or 5 GHz, up to Wi-Fi 6) and get an IPv4 address by DHCP.
 //!
 //! ```ignore
-//! let mut store = EncryptedFlashStore::open(FlashStorage::new(peripherals.FLASH))?;
-//! let credentials = wifi::load_or_provision(&mut store)?;
-//! let link = WifiLink::start(peripherals.WIFI, &credentials, spawner)?;
-//! let ip = link.wait_for_ip().await;
+//! let credentials = wifi::load_or_provision(&secrets)?;
+//! wifi::start(board.modem, sysloop, &credentials, status.clone())?;
 //! ```
-//!
-//! `esp_rtos::start` must have run before [`WifiLink::start`], and the heap must exist.
 //!
 //! # Where the credentials come from
 //!
-//! [`load_or_provision`] reads two **build-time** environment variables from the shell that runs
+//! [`load_or_provision`] reads two **build-time** environment variables of the shell that runs
 //! `cargo`: `PULSAR_WIFI_SSID` and `PULSAR_WIFI_PASSWORD`. If both are set they are written to
-//! the secret store (nothing is written when they are unchanged). If neither is set, the
-//! credentials already in the store are used, so you can rebuild and reflash without the
-//! password in your shell. Set only one of them and you get [`Error::IncompleteBuildEnv`].
+//! the [`SecretStore`] (nothing is written when they are unchanged). If neither is set, the
+//! credentials already in the store are used, so you can rebuild and reflash without the password
+//! in your shell. Setting only one of them is an error. Empty values count as unset.
 //!
-//! The password is never logged. Keep it out of shell history, for example with
+//! The password is never logged. Keep it out of your shell history, for example with
 //! `read -rs PULSAR_WIFI_PASSWORD; export PULSAR_WIFI_PASSWORD`.
 //!
-//! # Behaviour and limits
+//! # Behaviour
 //!
-//! - Only **WPA2-Personal** is accepted, so an access point cannot talk the chip into a weaker
-//!   mode. WPA3-only networks are not supported by this version of `esp-radio`; a network in
-//!   WPA2/WPA3 transition mode works.
-//! - After a lost connection or a failed attempt the link retries forever with a growing delay
-//!   (1 s up to 30 s). After [`FAILED_AFTER`] failures in a row the status shows
-//!   [`LinkState::Failed`] but the retries go on, so the board reconnects when the router
+//! - **WPA3-Personal only.** The minimum security level is WPA3, so an access point offering
+//!   WPA2 or weaker is refused and cannot talk the board into a downgrade. A router in
+//!   WPA2/WPA3 transition mode works (the board joins with WPA3).
+//! - **Both bands.** The board scans 2.4 GHz and 5 GHz and joins the strongest access point
+//!   that has the name; Wi-Fi 6 (802.11ax) is allowed on both bands.
+//! - **Persistent retries.** After a failed attempt or a lost connection it retries forever with
+//!   a doubling delay (see [`config`](crate::config)). After a few failures in a row the status
+//!   shows [`LinkState::Failed`], but retrying goes on, so the board reconnects when the router
 //!   comes back.
-//! - Progress is published as a [`WifiStatus`] on [`WIFI_STATUS`] for a display or anything else.
+//! - **RAM only.** The Wi-Fi driver is started without an NVS partition, so the password is
+//!   never copied into the plain `nvs` partition by ESP-IDF.
 //!
 //! # What this does not protect
 //!
-//! `esp-radio`'s `Password` is `Copy` and lives in RAM while the radio runs; it cannot be
-//! wiped. The password of a build that used the environment variable is also part of that
-//! firmware image (and of `target/` on your computer).
+//! The Wi-Fi driver keeps its own copy of the password in RAM while it runs, and a build made
+//! with the environment variables contains the password in the firmware image (and in `target/`
+//! on your computer).
 
-use core::fmt;
-use core::net::Ipv4Addr;
+use std::io;
+use std::net::Ipv4Addr;
+use std::thread;
+use std::time::Duration;
 
-use embassy_executor::Spawner;
-use embassy_net::{Config as NetConfig, Runner, Stack, StackResources};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::watch::Watch;
-use embassy_time::{Duration, Timer};
-use esp_hal::peripherals::WIFI;
-use esp_hal::rng::Rng;
-use esp_radio::wifi::sta::StationConfig;
-use esp_radio::wifi::{
-    AuthenticationMethodConfig, Config, ConnectionError, ControllerConfig, Interface, Password,
-    Ssid, WifiController, WifiError,
+use esp_idf_svc::eventloop::EspSystemEventLoop;
+use esp_idf_svc::hal::modem::Modem;
+use esp_idf_svc::ipv4::{
+    ClientConfiguration as IpClientConfiguration, Configuration as IpConfiguration,
+    DHCPClientSettings,
 };
-use log::{info, warn};
-use static_cell::StaticCell;
+use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
+use esp_idf_svc::sys::EspError;
+use esp_idf_svc::wifi::{
+    AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, ScanMethod,
+    ScanSortMethod, WifiDriver,
+};
+use zeroize::Zeroizing;
 
-use crate::secret_store::{self, MAX_SECRET_LEN, Secret, SecretStore};
+use crate::config::{
+    HOSTNAME, WIFI_BACKOFF_MAX, WIFI_BACKOFF_START, WIFI_FAILED_AFTER, WIFI_POLL_PERIOD,
+    WIFI_PREFER_5GHZ_MARGIN_DB, WIFI_SECRET_KEY, WIFI_STACK_BYTES,
+};
+use crate::platform;
+use crate::secrets::{self, SecretStore};
+use crate::status::{Band, LinkState, MAX_SSID_LEN, SharedStatus};
 
-/// The secret-store slot that holds the Wi-Fi credentials (SSID and password together).
-pub const CREDENTIALS_SLOT: u8 = 0;
-/// Longest SSID in bytes (802.11 limit).
-pub const MAX_SSID_LEN: usize = 32;
-/// Shortest WPA2 passphrase in bytes.
+/// Shortest password accepted (WPA3 itself allows less, but that is too weak to be sensible).
 pub const MIN_PASSWORD_LEN: usize = 8;
-/// Longest WPA2 passphrase in bytes (63 characters, or 64 hex digits for a raw key).
-pub const MAX_PASSWORD_LEN: usize = 64;
-/// Consecutive failed connection attempts before the status becomes [`LinkState::Failed`].
-pub const FAILED_AFTER: u32 = 3;
-
-const STATUS_POLL: Duration = Duration::from_secs(2);
-const BACKOFF_START: Duration = Duration::from_secs(1);
-const BACKOFF_MAX: Duration = Duration::from_secs(30);
-/// Sockets the network stack can hold. DHCP needs one; the rest are free for later use.
-const STACK_SOCKETS: usize = 3;
-
-/// The latest [`WifiStatus`]. Read it with `WIFI_STATUS.receiver()` (up to 2 receivers).
-pub static WIFI_STATUS: Watch<CriticalSectionRawMutex, WifiStatus, 2> =
-    Watch::new_with(WifiStatus::idle());
-
-static NET_RESOURCES: StaticCell<StackResources<STACK_SOCKETS>> = StaticCell::new();
+/// Longest password the Wi-Fi driver accepts.
+pub const MAX_PASSWORD_LEN: usize = 63;
+/// Size of the driver's password buffer (the limit plus room for a terminator).
+const PASSWORD_CAPACITY: usize = 64;
 
 /// What can go wrong when setting up Wi-Fi.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Only one of `PULSAR_WIFI_SSID` and `PULSAR_WIFI_PASSWORD` was set at build time.
+    #[error("set both PULSAR_WIFI_SSID and PULSAR_WIFI_PASSWORD at build time, or neither")]
     IncompleteBuildEnv,
     /// Nothing in the build environment and nothing in the secret store.
+    #[error("no Wi-Fi credentials: build once with PULSAR_WIFI_SSID and PULSAR_WIFI_PASSWORD set")]
     NoCredentials,
-    /// The SSID is empty, longer than [`MAX_SSID_LEN`] bytes, or the stored data is damaged.
+    /// The SSID is empty or longer than 32 bytes, or the stored record is damaged.
+    #[error("invalid SSID (1 to {MAX_SSID_LEN} bytes)")]
     InvalidSsid,
-    /// The password is shorter than [`MIN_PASSWORD_LEN`] or longer than [`MAX_PASSWORD_LEN`].
+    /// The configured hostname is longer than 30 bytes.
+    #[error("invalid hostname in config.rs (at most 30 bytes)")]
+    InvalidHostname,
+    /// The password length is outside the accepted range.
+    #[error("invalid password ({MIN_PASSWORD_LEN} to {MAX_PASSWORD_LEN} bytes)")]
     InvalidPassword,
-    /// [`WifiLink::start`] was called a second time.
-    AlreadyStarted,
     /// The secret store failed.
-    Store(secret_store::Error),
+    #[error("secret store: {0}")]
+    Secrets(#[from] secrets::Error),
     /// The Wi-Fi driver failed.
-    Radio(WifiError),
+    #[error("Wi-Fi driver: {0}")]
+    Driver(#[from] EspError),
+    /// The supervisor thread could not be created.
+    #[error("cannot start the Wi-Fi thread: {0}")]
+    Thread(#[from] io::Error),
 }
 
-impl From<secret_store::Error> for Error {
-    fn from(error: secret_store::Error) -> Self {
-        Self::Store(error)
-    }
+/// The SSID and password of a WPA3 network. `Debug` never prints the password, and the password
+/// is wiped from memory when this is dropped.
+pub struct Credentials {
+    ssid: heapless::String<MAX_SSID_LEN>,
+    password: Zeroizing<heapless::String<PASSWORD_CAPACITY>>,
 }
 
-impl From<WifiError> for Error {
-    fn from(error: WifiError) -> Self {
-        Self::Radio(error)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::IncompleteBuildEnv => write!(
-                f,
-                "set both PULSAR_WIFI_SSID and PULSAR_WIFI_PASSWORD at build time, or neither"
-            ),
-            Self::NoCredentials => write!(
-                f,
-                "no Wi-Fi credentials: build once with PULSAR_WIFI_SSID and PULSAR_WIFI_PASSWORD set"
-            ),
-            Self::InvalidSsid => write!(f, "invalid SSID (1 to {MAX_SSID_LEN} bytes of UTF-8)"),
-            Self::InvalidPassword => write!(
-                f,
-                "invalid password ({MIN_PASSWORD_LEN} to {MAX_PASSWORD_LEN} bytes)"
-            ),
-            Self::AlreadyStarted => write!(f, "Wi-Fi was already started"),
-            Self::Store(error) => write!(f, "secret store: {error}"),
-            Self::Radio(error) => write!(f, "Wi-Fi driver: {error:?}"),
-        }
-    }
-}
-
-impl core::error::Error for Error {}
-
-/// The SSID and password of a WPA2 network. `Debug` never prints the password.
-pub struct WifiCredentials {
-    ssid: [u8; MAX_SSID_LEN],
-    ssid_len: usize,
-    password: Secret<MAX_PASSWORD_LEN>,
-}
-
-impl WifiCredentials {
+impl Credentials {
     /// Checks the lengths and copies both values.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the SSID or the password has an unusable length.
     pub fn new(ssid: &str, password: &str) -> Result<Self, Error> {
-        Self::from_bytes(ssid.as_bytes(), password.as_bytes())
-    }
-
-    fn from_bytes(ssid: &[u8], password: &[u8]) -> Result<Self, Error> {
-        if ssid.is_empty() || ssid.len() > MAX_SSID_LEN || core::str::from_utf8(ssid).is_err() {
+        if ssid.is_empty() {
             return Err(Error::InvalidSsid);
         }
         if !(MIN_PASSWORD_LEN..=MAX_PASSWORD_LEN).contains(&password.len()) {
             return Err(Error::InvalidPassword);
         }
-        let password = Secret::from_slice(password).ok_or(Error::InvalidPassword)?;
-        let mut buffer = [0; MAX_SSID_LEN];
-        buffer[..ssid.len()].copy_from_slice(ssid);
         Ok(Self {
-            ssid: buffer,
-            ssid_len: ssid.len(),
-            password,
+            ssid: ssid.try_into().map_err(|_| Error::InvalidSsid)?,
+            password: Zeroizing::new(password.try_into().map_err(|_| Error::InvalidPassword)?),
         })
     }
 
     /// The network name.
+    #[must_use]
     pub fn ssid(&self) -> &str {
-        // Checked to be valid UTF-8 in `from_bytes`.
-        core::str::from_utf8(&self.ssid[..self.ssid_len]).unwrap_or("")
+        &self.ssid
     }
 
     /// One byte for the SSID length, the SSID, then the password: the format kept in the store.
-    fn encode(&self) -> Result<Secret<MAX_SECRET_LEN>, Error> {
-        Secret::concat(&[
-            &[self.ssid_len as u8],
-            &self.ssid[..self.ssid_len],
-            self.password.as_bytes(),
-        ])
-        .ok_or(Error::InvalidPassword)
+    fn encode(&self) -> Zeroizing<Vec<u8>> {
+        let mut record = Zeroizing::new(Vec::with_capacity(
+            1 + self.ssid.len() + self.password.len(),
+        ));
+        // An SSID is at most 32 bytes, so its length always fits in one byte.
+        record.push(u8::try_from(self.ssid.len()).unwrap_or(u8::MAX));
+        record.extend_from_slice(self.ssid.as_bytes());
+        record.extend_from_slice(self.password.as_bytes());
+        record
     }
 
-    fn decode(bytes: &[u8]) -> Result<Self, Error> {
-        let (&ssid_len, rest) = bytes.split_first().ok_or(Error::InvalidSsid)?;
-        let ssid_len = usize::from(ssid_len);
-        if rest.len() < ssid_len {
-            return Err(Error::InvalidSsid);
-        }
-        let (ssid, password) = rest.split_at(ssid_len);
-        Self::from_bytes(ssid, password)
-    }
-}
-
-impl fmt::Debug for WifiCredentials {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "WifiCredentials {{ ssid: {:?}, password: <redacted> }}",
-            self.ssid()
-        )
+    fn decode(record: &[u8]) -> Result<Self, Error> {
+        let (&ssid_len, rest) = record.split_first().ok_or(Error::InvalidSsid)?;
+        let (ssid, password) = rest
+            .split_at_checked(usize::from(ssid_len))
+            .ok_or(Error::InvalidSsid)?;
+        let ssid = core::str::from_utf8(ssid).map_err(|_| Error::InvalidSsid)?;
+        let password = core::str::from_utf8(password).map_err(|_| Error::InvalidPassword)?;
+        Self::new(ssid, password)
     }
 }
 
-/// Gets the credentials: from the build environment (and stores them), or else from `store`.
+impl core::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Credentials")
+            .field("ssid", &self.ssid)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+/// Gets the credentials: from the build environment (and stores them), or else from `secrets`.
 ///
-/// See the [module documentation](self) for the environment variables. Never logs the password.
-pub fn load_or_provision(store: &mut impl SecretStore) -> Result<WifiCredentials, Error> {
+/// See the [module documentation](self) for the environment variables.
+///
+/// # Errors
+///
+/// Fails if there are no credentials, they are invalid, or the store fails.
+pub fn load_or_provision(secrets: &SecretStore) -> Result<Credentials, Error> {
+    // Empty values count as unset.
     let from_env = |value: Option<&'static str>| value.filter(|value| !value.is_empty());
 
     match (
@@ -217,224 +179,153 @@ pub fn load_or_provision(store: &mut impl SecretStore) -> Result<WifiCredentials
         from_env(option_env!("PULSAR_WIFI_PASSWORD")),
     ) {
         (Some(ssid), Some(password)) => {
-            let credentials = WifiCredentials::new(ssid, password)?;
-            store.put(CREDENTIALS_SLOT, credentials.encode()?.as_bytes())?;
-            info!(
-                "wifi: credentials for '{}' taken from the build environment and stored",
+            let credentials = Credentials::new(ssid, password)?;
+            secrets.put(WIFI_SECRET_KEY, &credentials.encode())?;
+            log::info!(
+                "credentials for '{}' taken from the build environment and stored",
                 credentials.ssid()
             );
             Ok(credentials)
         }
         (None, None) => {
-            let stored = store
-                .get_secret::<MAX_SECRET_LEN>(CREDENTIALS_SLOT)?
-                .ok_or(Error::NoCredentials)?;
-            let credentials = WifiCredentials::decode(stored.as_bytes())?;
-            info!(
-                "wifi: using stored credentials for '{}'",
-                credentials.ssid()
-            );
+            let record = secrets.get(WIFI_SECRET_KEY)?.ok_or(Error::NoCredentials)?;
+            let credentials = Credentials::decode(&record)?;
+            log::info!("using the stored credentials for '{}'", credentials.ssid());
             Ok(credentials)
         }
         _ => Err(Error::IncompleteBuildEnv),
     }
 }
 
-/// How the link is doing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LinkState {
-    /// Wi-Fi has not been started yet.
-    Idle,
-    /// No credentials were available, so Wi-Fi was not started.
-    NoCredentials,
-    /// Trying to join the network.
-    Connecting,
-    /// Associated with the access point (an IP address may still be pending).
-    Connected,
-    /// [`FAILED_AFTER`] or more attempts in a row failed; still retrying.
-    Failed,
-}
+/// Starts Wi-Fi and returns at once. A thread keeps the connection alive and publishes progress
+/// on `status`.
+///
+/// # Errors
+///
+/// Fails if the driver cannot be set up or the thread cannot be created. A wrong password or a
+/// missing router is **not** an error here: it shows up as [`LinkState::Failed`] on `status`.
+pub fn start(
+    modem: Modem<'static>,
+    sysloop: EspSystemEventLoop,
+    credentials: &Credentials,
+    status: SharedStatus,
+) -> Result<(), Error> {
+    // No NVS partition: the driver then keeps its configuration (and the password) in RAM only.
+    let station = EspNetif::new_with_conf(&NetifConfiguration {
+        ip_configuration: Some(IpConfiguration::Client(IpClientConfiguration::DHCP(
+            DHCPClientSettings {
+                hostname: Some(HOSTNAME.try_into().map_err(|_| Error::InvalidHostname)?),
+            },
+        ))),
+        ..NetifConfiguration::wifi_default_client()
+    })?;
+    let driver = EspWifi::wrap_all(
+        WifiDriver::new(modem, sysloop.clone(), None)?,
+        station,
+        EspNetif::new(NetifStack::Ap)?,
+    )?;
+    let mut wifi = BlockingWifi::wrap(driver, sysloop)?;
 
-/// A snapshot of the Wi-Fi link, published on [`WIFI_STATUS`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WifiStatus {
-    pub state: LinkState,
-    ssid: [u8; MAX_SSID_LEN],
-    ssid_len: u8,
-    /// Signal strength of the access point in dBm (about -30 is excellent, -90 is unusable).
-    pub rssi_dbm: Option<i32>,
-    /// The address from DHCP, once there is one.
-    pub ip: Option<Ipv4Addr>,
-}
-
-impl WifiStatus {
-    const fn idle() -> Self {
-        Self {
-            state: LinkState::Idle,
-            ssid: [0; MAX_SSID_LEN],
-            ssid_len: 0,
-            rssi_dbm: None,
-            ip: None,
-        }
+    wifi.set_configuration(&Configuration::Client(ClientConfiguration {
+        ssid: credentials.ssid.clone(),
+        password: (*credentials.password).clone(),
+        // The minimum security level: weaker access points are not considered at all.
+        auth_method: AuthMethod::WPA3Personal,
+        // Look on every channel of both bands and pick the strongest access point (5 GHz gets a
+        // head start, see `prefer_5ghz` below).
+        scan_method: ScanMethod::CompleteScan(ScanSortMethod::Signal),
+        ..ClientConfiguration::default()
+    }))?;
+    platform::prefer_5ghz(WIFI_PREFER_5GHZ_MARGIN_DB)?;
+    wifi.start()?;
+    platform::enable_dual_band_wifi6()?;
+    if let Ok(name) = wifi.wifi().sta_netif().get_hostname() {
+        log::info!("hostname: {name}");
     }
 
-    /// A status with no SSID, signal or address. For states that need no more than the state.
-    pub const fn with_state(state: LinkState) -> Self {
-        Self {
-            state,
-            ..Self::idle()
-        }
-    }
+    status.update(|status| {
+        status.ssid = credentials.ssid.clone();
+        status.state = LinkState::Connecting;
+    });
 
-    fn for_network(state: LinkState, ssid: &str) -> Self {
-        let mut status = Self::with_state(state);
-        let len = ssid.len().min(MAX_SSID_LEN);
-        status.ssid[..len].copy_from_slice(&ssid.as_bytes()[..len]);
-        status.ssid_len = len as u8;
-        status
-    }
-
-    /// The network name, empty when unknown.
-    pub fn ssid(&self) -> &str {
-        core::str::from_utf8(&self.ssid[..usize::from(self.ssid_len)]).unwrap_or("")
-    }
+    thread::Builder::new()
+        .name("wifi".into())
+        .stack_size(WIFI_STACK_BYTES)
+        .spawn(move || supervise(&mut wifi, &status))?;
+    Ok(())
 }
 
-/// A running Wi-Fi station with an IPv4 network stack.
-pub struct WifiLink {
-    stack: Stack<'static>,
-}
-
-impl WifiLink {
-    /// Starts the radio, begins joining the network and returns at once. Use
-    /// [`wait_for_ip`](Self::wait_for_ip) to wait for the connection.
-    ///
-    /// Spawns two tasks (the connection manager and the network stack runner).
-    pub fn start(
-        wifi: WIFI<'static>,
-        credentials: &WifiCredentials,
-        spawner: Spawner,
-    ) -> Result<Self, Error> {
-        let resources = NET_RESOURCES
-            .try_init(StackResources::new())
-            .ok_or(Error::AlreadyStarted)?;
-
-        let mut controller = WifiController::new(wifi, ControllerConfig::default())?;
-        let station = StationConfig::default()
-            .with_ssid(Ssid::try_from(credentials.ssid())?)
-            .with_authentication(AuthenticationMethodConfig::Wpa2Personal(
-                Password::try_from(credentials.password.as_bytes())?,
-            ));
-        controller.set_config(&Config::Station(station))?;
-
-        let rng = Rng::new();
-        let seed = (u64::from(rng.random()) << 32) | u64::from(rng.random());
-        let (stack, runner) = embassy_net::new(
-            Interface::station(),
-            NetConfig::dhcpv4(Default::default()),
-            resources,
-            seed,
-        );
-
-        let network = WifiStatus::for_network(LinkState::Connecting, credentials.ssid());
-        WIFI_STATUS.sender().send(network);
-        spawner.spawn(net_task(runner).unwrap());
-        spawner.spawn(connection_task(controller, stack, network).unwrap());
-        Ok(Self { stack })
-    }
-
-    /// Waits until DHCP has given the board an address and returns it.
-    pub async fn wait_for_ip(&self) -> Ipv4Addr {
-        loop {
-            self.stack.wait_config_up().await;
-            if let Some(ip) = self.ip() {
-                return ip;
-            }
-        }
-    }
-
-    /// The current IPv4 address, if there is one.
-    pub fn ip(&self) -> Option<Ipv4Addr> {
-        ip_of(self.stack)
-    }
-
-    /// The network stack, for opening sockets.
-    pub fn stack(&self) -> Stack<'static> {
-        self.stack
-    }
-}
-
-fn ip_of(stack: Stack<'static>) -> Option<Ipv4Addr> {
-    stack.config_v4().map(|config| config.address.address())
-}
-
-fn backoff(failures: u32) -> Duration {
-    let shift = failures.saturating_sub(1).min(5);
-    (BACKOFF_START * (1 << shift)).min(BACKOFF_MAX)
-}
-
-#[embassy_executor::task]
-async fn net_task(mut runner: Runner<'static, Interface>) -> ! {
-    runner.run().await
-}
-
-/// Joins the network, publishes the status while connected, and rejoins after any loss.
-#[embassy_executor::task]
-async fn connection_task(
-    mut controller: WifiController<'static>,
-    stack: Stack<'static>,
-    network: WifiStatus,
-) -> ! {
-    let status = WIFI_STATUS.sender();
+/// Keeps the connection alive forever.
+fn supervise(wifi: &mut BlockingWifi<EspWifi<'static>>, status: &SharedStatus) {
     let mut failures: u32 = 0;
-
     loop {
-        let state = if failures >= FAILED_AFTER {
+        let state = if failures >= WIFI_FAILED_AFTER {
             LinkState::Failed
         } else {
             LinkState::Connecting
         };
-        status.send(WifiStatus { state, ..network });
+        status.update(|status| {
+            status.state = state;
+            status.rssi_dbm = None;
+            status.band = None;
+            status.ip = None;
+        });
 
-        match controller.connect_async().await {
-            Ok(info) => {
+        match join(wifi) {
+            Ok(()) => {
                 failures = 0;
-                info!("wifi: connected on channel {}", info.channel);
-                // `rssi()` fails with `NotConnected` once the access point is gone.
-                loop {
-                    let rssi_dbm = match controller.rssi() {
-                        Ok(rssi) => Some(rssi),
-                        Err(WifiError::NotConnected) => break,
-                        Err(_) => None,
-                    };
-                    status.send(WifiStatus {
-                        state: LinkState::Connected,
-                        rssi_dbm,
-                        ip: ip_of(stack),
-                        ..network
-                    });
-                    Timer::after(STATUS_POLL).await;
-                }
-                warn!("wifi: connection lost");
-                Timer::after(BACKOFF_START).await;
+                monitor(wifi, status);
+                log::warn!("connection lost");
             }
             Err(error) => {
                 failures = failures.saturating_add(1);
-                // Log the reason only: the full error carries the SSID and BSSID.
-                match error {
-                    ConnectionError::Failed(info) => {
-                        warn!(
-                            "wifi: connect failed (attempt {failures}): {:?}",
-                            info.reason
-                        );
-                    }
-                    ConnectionError::WifiError(error) => {
-                        warn!("wifi: connect failed (attempt {failures}): {error:?}");
-                    }
-                    _ => warn!("wifi: connect failed (attempt {failures})"),
-                }
-                Timer::after(backoff(failures)).await;
+                log::warn!("connect failed (attempt {failures}): {error}");
             }
         }
+
+        // Reset the driver's state before the next attempt.
+        if let Err(error) = wifi.disconnect() {
+            log::debug!("disconnect: {error}");
+        }
+        thread::sleep(backoff(failures));
     }
+}
+
+/// Connects to the access point and waits for an IP address.
+fn join(wifi: &mut BlockingWifi<EspWifi<'static>>) -> Result<(), EspError> {
+    wifi.connect()?;
+    wifi.wait_netif_up()
+}
+
+/// Publishes signal, band and address every [`WIFI_POLL_PERIOD`] until the connection is lost.
+fn monitor(wifi: &BlockingWifi<EspWifi<'static>>, status: &SharedStatus) {
+    loop {
+        // `get_ap_info` fails as soon as the station is no longer associated.
+        let Ok(info) = wifi.wifi().get_ap_info() else {
+            return;
+        };
+        let ip = wifi
+            .wifi()
+            .sta_netif()
+            .get_ip_info()
+            .ok()
+            .map(|info| info.ip)
+            .filter(|ip| *ip != Ipv4Addr::UNSPECIFIED);
+
+        status.update(|status| {
+            status.state = LinkState::Connected;
+            status.rssi_dbm = Some(i32::from(info.signal_strength));
+            status.band = Some(Band::from_channel(info.channel));
+            status.ip = ip;
+        });
+        thread::sleep(WIFI_POLL_PERIOD);
+    }
+}
+
+/// The wait before retry number `failures`: doubles every time, up to [`WIFI_BACKOFF_MAX`].
+fn backoff(failures: u32) -> Duration {
+    let doublings = failures.saturating_sub(1).min(5);
+    WIFI_BACKOFF_START
+        .saturating_mul(1 << doublings)
+        .min(WIFI_BACKOFF_MAX)
 }

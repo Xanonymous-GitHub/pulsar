@@ -1,80 +1,80 @@
 # pulsar
 
-Pulsar is firmware for the ESP32-C5 microcontroller. It uses Rust and the `esp-hal` crate.
+Pulsar is firmware for the Seeed XIAO ESP32-C5 on the Seeeduino XIAO Expansion Board. It is written in Rust on top of ESP-IDF v6.1 (`std`, via `esp-idf-svc`).
 
-The program prints a log message 10 times, 500 ms apart. Then it idles. Use it as a base for new ESP32-C5 projects.
+What it does:
+
+- Joins a **WPA3-Personal** Wi-Fi network on **2.4 GHz or 5 GHz** (Wi-Fi 6 is allowed on both bands). It prefers 5 GHz when that signal is within 10 dB of the best 2.4 GHz one (`WIFI_PREFER_5GHZ_MARGIN_DB` in `src/config.rs`), and uses 2.4 GHz otherwise. The device name on the network is `pulsar`.
+- Shows the SSID, signal strength, band and a signal-bar icon on the 0.96" OLED, with a scrolling text under it.
+- Blinks the user LED.
+- Keeps the Wi-Fi password in an encrypted NVS partition. See [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md).
 
 ## Requirements
 
-- An ESP32-C5 board with a USB cable that carries data.
-- Rust 1.99 or later, installed with `rustup`.
-- The `espflash` tool. Install it with `cargo install espflash`.
+- A XIAO ESP32-C5 with a USB cable that carries data.
+- `rustup`. The file `rust-toolchain.toml` installs the pinned nightly and `rust-src`. The ESP32-C5 Rust target is tier 3, so it needs nightly and `build-std`.
+- `espflash` and `ldproxy`: `cargo install espflash ldproxy --locked`.
+- The ESP-IDF build prerequisites: `git`, `cmake`, `ninja`, `python3` with `venv` and `gzip`, and a C compiler for the host.
 
-The file `rust-toolchain.toml` installs the `riscv32imac-unknown-none-elf` target automatically.
+The first build downloads ESP-IDF v6.1 and its tools into `.embuild/` (git-ignored). This takes a while. Later builds are fast.
 
 ## Build and flash
 
-1. Connect the board to your computer.
-2. Run `cargo run` in the project directory.
+Pass the Wi-Fi settings through the environment of the build. They are never stored in a tracked file. `read -rs` keeps the password out of your history:
 
-`cargo run` builds the firmware, flashes it to the board, and opens the serial monitor.
-
-The monitor shows these log lines:
-
-```
-INFO - Hello world! (iteration 0)
-...
-INFO - Hello world! (iteration 9)
-INFO - Done, idling.
+```sh
+export PULSAR_WIFI_SSID='my-network'
+read -rs PULSAR_WIFI_PASSWORD && export PULSAR_WIFI_PASSWORD
+cargo run --features insecure-dev-store
 ```
 
-For a release build, run `cargo run --release`.
+`cargo run` builds, flashes (with `partitions.csv`) and opens the serial monitor. Run it from the project root.
 
-## Serial monitor
+On the first run the credentials are stored on the chip. Later builds can leave both variables unset and the firmware uses the stored ones. If only one of them is set, the build is refused at start-up.
 
-| Key      | Action                                     |
-|----------|--------------------------------------------|
-| `Ctrl+R` | Reset the chip. The program starts again.  |
-| `Ctrl+C` | Close the monitor. The chip keeps running. |
+The secret store refuses to open unless flash encryption is on. The `insecure-dev-store` feature lets it open without it, for testing on your desk only. It logs a warning at every boot. Follow [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md) to turn flash encryption on and drop the feature.
 
-To open the monitor without flashing, run `espflash monitor --chip esp32c5`.
+For a release build, add `--release`.
+
+## Serial monitor without a terminal
+
+`cargo run` needs a real terminal for the monitor. In a script or CI shell use:
+
+```sh
+espflash monitor --non-interactive
+```
 
 ## Troubleshooting
 
-**The monitor shows `Broken pipe` after flashing.**
-The USB connection restarted when the program started. Run `espflash monitor --chip esp32c5`. Then press `Ctrl+R`.
-
 **Flashing fails.**
-1. Hold the BOOT button and press RESET.
+1. Hold BOOT and press RESET.
 2. Release BOOT.
 3. Run `cargo run` again.
 
-If you connect more than one board, add `--port <PORT>` to the `espflash` command. Use the port name from `ls /dev/cu.usb*`.
+If more than one board is connected, add `--port <PORT>` to the `espflash` command. Use the name from `ls /dev/cu.usb*`.
 
-**The build fails with `invalid Mach-O section specifier`.**
-Cargo builds for your computer and not for the chip. Make sure `.cargo/config.toml` exists. It must set `target = "riscv32imac-unknown-none-elf"` in the `[build]` section.
+**The build fails inside `std` with `st_atime` errors.**
+A newer nightly than the pinned one is in use. Keep the `channel` in `rust-toolchain.toml`: from `nightly-2026-10-20` on, `std` does not compile for ESP-IDF with the current `libc` crate.
+
+**The ESP-IDF build fails in a Python step.**
+Delete `.embuild/espressif/python_env` and build again. It is rebuilt from your current Python.
+
+**rust-analyzer says it can't find `core` or `std`.**
+This is a false alarm for this tier-3 target. `cargo build` is the source of truth.
 
 ## Project layout
 
-| Path                  | Contents                                                        |
-|-----------------------|-----------------------------------------------------------------|
-| `src/bin/main.rs`     | The firmware entry point.                                       |
-| `.cargo/config.toml`  | The build target, the flash command, and the default log level. |
-| `build.rs`            | The linker script setup.                                        |
-| `rust-toolchain.toml` | The Rust toolchain and target.                                  |
-| `AGENTS.md`           | Instructions for AI coding agents.                              |
-
-## Configuration
-
-Set the log level with the `ESP_LOG` environment variable. The default is `info`. Example: `ESP_LOG=debug cargo run`.
-
-## Limits
-
-- The code uses `no_std`. It cannot use the Rust standard library.
-- The project has no heap allocator. Types such as `Vec` and `String` are not available.
-
-## References
-
-- [esp-hal documentation](https://docs.espressif.com/projects/rust/esp-hal/1.2.2/index.html)
-- [esp-hal examples](https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.2.2/examples)
-- [esp-generate](https://github.com/esp-rs/esp-generate), the template this project started from
+| Path | Contents |
+|---|---|
+| `src/main.rs` | Wiring only: start the LED, the screen and Wi-Fi. |
+| `src/config.rs` | Every tunable constant (periods, stack sizes, text, hostname). |
+| `src/board.rs` | The pin map for the board and expansion board. |
+| `src/wifi.rs` | Credentials, WPA3 station, dual-band setup, reconnect with backoff. |
+| `src/secrets.rs` | The encrypted secret store on top of NVS. |
+| `src/status.rs` | The Wi-Fi status shared between Wi-Fi and the screen. |
+| `src/ui/` | The screen: status bar and scrolling text. |
+| `src/led.rs` | The blinking LED. |
+| `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
+| `partitions.csv` | Flash layout, including the `secrets` and `nvs_keys` partitions. |
+| `sdkconfig.defaults` | ESP-IDF settings for development. |
+| `sdkconfig.defaults.secure` | Flash encryption overlay. Applied only by you. |
