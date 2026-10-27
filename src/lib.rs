@@ -10,8 +10,10 @@
 //! - [`led`]: the blinking user LED.
 //! - [`ui`]: the OLED (status bar and scrolling message).
 //! - [`wifi`]: joining a WPA3 network.
+//! - [`clock`]: the wall clock, set with SNTP (TLS needs it).
 
 pub mod board;
+pub mod clock;
 pub mod config;
 pub mod led;
 pub mod platform;

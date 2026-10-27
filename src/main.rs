@@ -4,7 +4,7 @@ use anyhow::Result;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use pulsar::{
     board::Board,
-    led,
+    clock, led,
     secrets::SecretStore,
     status::{LinkState, SharedStatus},
     ui::Screen,
@@ -47,9 +47,17 @@ fn main() -> Result<()> {
         .ok_or(wifi::Error::NoCredentials)
         .and_then(|secrets| wifi::load_or_provision(&secrets))
         .and_then(|credentials| wifi::start(board.modem, sysloop, &credentials, status.clone()));
-    if let Err(error) = started {
-        log::error!("Wi-Fi not started: {error}");
-        status.update(|status| status.state = LinkState::NoCredentials);
+    match started {
+        // The network stack exists now, so SNTP can start. It waits for the connection by itself.
+        Ok(()) => {
+            if let Err(error) = clock::start() {
+                log::error!("clock not started: {error}");
+            }
+        }
+        Err(error) => {
+            log::error!("Wi-Fi not started: {error}");
+            status.update(|status| status.state = LinkState::NoCredentials);
+        }
     }
 
     log::info!("pulsar started");

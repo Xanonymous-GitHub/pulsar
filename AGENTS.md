@@ -24,6 +24,7 @@ Firmware for the Seeed XIAO ESP32-C5 on the Seeeduino XIAO Expansion Board. Rust
 - `esp-idf-svc` 0.53 ignores `ClientConfiguration::pmf_cfg` (hardcodes PMF off in the conversion); WPA3 is enforced by `AuthMethod::WPA3Personal` and the ESP-IDF C layer (the log shows `pmf:1`). Band mode and per-band Wi-Fi 6 protocols are set through `esp-idf-sys` in `src/platform.rs`.
 - 5 GHz is preferred through `scan_threshold` `rssi_5g_adjustment` (`config::WIFI_PREFER_5GHZ_MARGIN_DB`, set in `platform::prefer_5ghz`): a 5 GHz AP within that many dB of the best 2.4 GHz AP wins. It applies at connect time only; the board does not roam to 5 GHz later. In the C struct the field is `wifi_sta_config_t.threshold`.
 - The station hostname (`pulsar`) is set on the station `EspNetif` DHCP settings, so `EspWifi::wrap_all` needs an AP netif as well (SoftAP support is compiled in).
+- Asia/Taipei is a fixed UTC+8 (no daylight saving), so `clock::LocalTime` uses an offset and needs no time zone database or `setenv("TZ")`.
 - rust-analyzer reports false "can't find crate for core/std" for this target; trust `cargo build`.
 - The display is an SSD1306 128x64 on I2C (XIAO D4 = SDA = GPIO23, D5 = SCL = GPIO24); the user LED is GPIO27.
 - `eim_config.toml` and the Espressif Installation Manager install are not used by the Rust build.

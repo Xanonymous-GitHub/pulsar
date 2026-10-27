@@ -72,6 +72,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/wifi.rs` | Credentials, WPA3 station, dual-band setup, reconnect with backoff. |
 | `src/secrets.rs` | The encrypted secret store on top of NVS. |
 | `src/status.rs` | The Wi-Fi status shared between Wi-Fi and the screen. |
+| `src/clock.rs` | SNTP and the local time of day. |
 | `src/ui/` | The screen: status bar and scrolling text. |
 | `src/led.rs` | The blinking LED. |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |

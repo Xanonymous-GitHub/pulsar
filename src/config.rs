@@ -52,3 +52,13 @@ pub const WIFI_PREFER_5GHZ_MARGIN_DB: u8 = 10;
 
 /// The name the router shows for this device (sent as the DHCP hostname). At most 30 bytes.
 pub const HOSTNAME: &str = "pulsar";
+
+/// A clock that shows a time before this (seconds since the Unix epoch) has not been set yet: the
+/// board starts in 1970. This is 2026-01-01 00:00:00 UTC (490,896 hours). Raise it from time to
+/// time.
+pub const CLOCK_VALID_AFTER: Duration = Duration::from_hours(490_896);
+
+/// The local time zone as an offset from UTC. Taipei (Asia/Taipei) is UTC+8 all year, with no
+/// daylight saving time since 1979, so a fixed offset is exact. A zone with daylight saving time
+/// would need a time zone database instead.
+pub const LOCAL_UTC_OFFSET: Duration = Duration::from_hours(8);
