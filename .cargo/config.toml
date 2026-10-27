@@ -1,5 +1,6 @@
 [target.riscv32imac-unknown-none-elf]
-runner = "espflash flash --monitor --chip esp32c5"
+# Run `cargo run` from the project root: partitions.csv is resolved relative to the current directory.
+runner = "espflash flash --monitor --chip esp32c5 --partition-table partitions.csv"
 
 [env]
 ESP_LOG = "info"

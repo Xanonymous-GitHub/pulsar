@@ -1,5 +1,8 @@
 /target
 /eim_config.toml
+# Local files that may hold credentials (the Wi-Fi password normally comes from the shell environment)
+.env
+.env.*
 /.idea
 .vscode/*
 !.vscode/settings.json

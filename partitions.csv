@@ -1,0 +1,9 @@
+# Name,    Type, SubType,   Offset, Size,    Flags
+# Flashed by `cargo run` (see the runner in .cargo/config.toml).
+#
+# 'secrets' holds the secret store (src/secret_store.rs). It MUST use the 'undefined' subtype
+# (esp-bootloader-esp-idf cannot parse custom subtypes) and MUST have the 'encrypted' flag.
+nvs,       data, nvs,       ,       0x6000,
+phy_init,  data, phy,       ,       0x1000,
+secrets,   data, undefined, ,       0x1000,  encrypted
+factory,   app,  factory,   ,       3M,

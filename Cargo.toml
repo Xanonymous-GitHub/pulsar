@@ -21,6 +21,33 @@ esp-println      = { version = "0.18.0", features = ["esp32c5", "log-04"] }
 embedded-graphics = "0.8.2"
 ssd1306           = "0.10.0"
 
+# Wi-Fi needs a heap and a preemptive scheduler. esp-rtos' `embassy` feature also gives us the async executor.
+esp-alloc       = { version = "0.11.0", features = ["esp32c5"] }
+esp-radio       = { version = "1.0.0-beta.1", features = ["esp32c5", "wifi"] }
+esp-rtos        = { version = "0.4.0", features = ["esp32c5", "esp-radio", "esp-alloc", "embassy"] }
+embassy-executor = "0.10"
+embassy-sync     = "0.8"
+embassy-time     = "0.5"
+
+# TCP/IP stack on top of the Wi-Fi station interface (DHCP only for now).
+embassy-net = { version = "0.9", features = ["dhcpv4", "medium-ethernet", "proto-ipv4"] }
+static_cell = "2"
+
+# Encrypted flash access for the secret store (src/secret_store.rs).
+esp-storage = { version = "0.10.0", features = ["esp32c5"] }
+
+[features]
+# Lets the secret store work WITHOUT flash encryption (secrets end up in plain text, with a loud
+# warning at boot). For testing before flash encryption is enabled. Never use it for real secrets.
+insecure-dev-store = []
+
+# The radio blobs only work with optimization level 2 or 3 (see the esp-radio docs).
+[profile.dev.package.esp-radio]
+opt-level = 3
+
+[profile.release.package.esp-radio]
+opt-level = 3
+
 
 # For fine-tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
 [profile.dev]
