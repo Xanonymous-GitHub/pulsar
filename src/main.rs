@@ -3,11 +3,12 @@
 use anyhow::Result;
 use esp_idf_svc::eventloop::EspSystemEventLoop;
 use pulsar::{
+    bluetooth,
     board::Board,
     clock, config, led,
     message::SharedMessage,
     secrets::SecretStore,
-    status::{LinkState, SharedStatus},
+    status::{BtState, LinkState, SharedBluetooth, SharedStatus},
     ui::Screen,
     weather, wifi,
 };
@@ -36,18 +37,27 @@ fn main() -> Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let status = SharedStatus::default();
+    let bluetooth_status = SharedBluetooth::default();
     let message = SharedMessage::new(config::SCROLL_PLACEHOLDER);
     let board = Board::take()?;
     let sysloop = EspSystemEventLoop::take()?;
 
     led::spawn(board.led)?;
-    Screen::new(board.display_i2c, status.clone(), message.clone())?.spawn()?;
+    Screen::new(
+        board.display_i2c,
+        status.clone(),
+        bluetooth_status.clone(),
+        message.clone(),
+    )?
+    .spawn()?;
 
     // Wi-Fi needs its credentials from the store. If they are missing, the rest of the firmware
     // keeps running and the screen says why.
-    let started = open_secrets()
+    let secrets = open_secrets();
+    let started = secrets
+        .as_ref()
         .ok_or(wifi::Error::NoCredentials)
-        .and_then(|secrets| wifi::load_or_provision(&secrets))
+        .and_then(wifi::load_or_provision)
         .and_then(|credentials| wifi::start(board.modem, sysloop, &credentials, status.clone()));
     match started {
         // The network stack exists now, so SNTP can start. It waits for the connection by itself.
@@ -64,6 +74,18 @@ fn main() -> Result<()> {
             log::error!("Wi-Fi not started: {error}");
             status.update(|status| status.state = LinkState::NoCredentials);
         }
+    }
+
+    // Bluetooth does not depend on Wi-Fi. It keeps the bonds of paired phones in the secret store
+    // (which it now owns), and offers the Wi-Fi status and the weather text to them.
+    if let Err(error) = bluetooth::start(
+        secrets,
+        status.clone(),
+        message.clone(),
+        bluetooth_status.clone(),
+    ) {
+        log::error!("Bluetooth not started: {error}");
+        bluetooth_status.update(|status| status.state = BtState::Failed);
     }
 
     log::info!("pulsar started");

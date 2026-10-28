@@ -1,8 +1,10 @@
-//! The OLED: a status bar (Wi-Fi and the local time) on top and a scrolling message below.
+//! The OLED: a status bar (Wi-Fi, Bluetooth and the local time) on top and a scrolling message
+//! below.
 //!
 //! [`Screen`] owns the display and a thread that redraws it at a fixed rate. It reads the Wi-Fi
-//! state from a [`SharedStatus`], the scrolling text from a [`SharedMessage`] and the time from
-//! [`clock`]; it never talks to the network code directly.
+//! state from a [`SharedStatus`], the Bluetooth state from a [`SharedBluetooth`], the scrolling
+//! text from a [`SharedMessage`] and the time from [`clock`]; it never talks to the radio code
+//! directly.
 
 pub mod scroll;
 pub mod status_bar;
@@ -24,9 +26,11 @@ use ssd1306::prelude::*;
 use ssd1306::{I2CDisplayInterface, Ssd1306};
 
 use crate::clock;
-use crate::config::{FRAME_PERIOD, SCREEN_STACK_BYTES, SCROLL_STEP, STATUS_BAR_HEIGHT};
+use crate::config::{
+    BLUETOOTH_BLINK_PERIOD, FRAME_PERIOD, SCREEN_STACK_BYTES, SCROLL_STEP, STATUS_BAR_HEIGHT,
+};
 use crate::message::SharedMessage;
-use crate::status::SharedStatus;
+use crate::status::{SharedBluetooth, SharedStatus};
 use scroll::ScrollingText;
 use status_bar::StatusBar;
 
@@ -60,7 +64,10 @@ pub struct Screen {
     bar: StatusBar,
     scroller: ScrollingText,
     status: SharedStatus,
+    bluetooth: SharedBluetooth,
     message: SharedMessage,
+    /// When the screen was created: the blinking icons count from here.
+    started: Instant,
     /// The generation of the message that is on the screen, see [`SharedMessage::take_update`].
     message_generation: u64,
 }
@@ -74,6 +81,7 @@ impl Screen {
     pub fn new(
         i2c: I2cDriver<'static>,
         status: SharedStatus,
+        bluetooth: SharedBluetooth,
         message: SharedMessage,
     ) -> Result<Self, Error> {
         let mut display = Ssd1306::new(
@@ -91,7 +99,9 @@ impl Screen {
             scroller: ScrollingText::new("", MonoTextStyle::new(&FONT_10X20, BinaryColor::On))
                 .with_step(SCROLL_STEP),
             status,
+            bluetooth,
             message,
+            started: Instant::now(),
             message_generation: 0,
         })
     }
@@ -134,11 +144,16 @@ impl Screen {
             self.scroller.set_text(text);
         }
         let time = clock::local_time().map(|time| time.to_string());
+        // On for the first half of every blink period, off for the second.
+        let blink_on = self.started.elapsed().as_millis() % BLUETOOTH_BLINK_PERIOD.as_millis()
+            < BLUETOOTH_BLINK_PERIOD.as_millis() / 2;
 
         self.display.clear(BinaryColor::Off)?;
         self.bar.draw(
             &self.status.snapshot(),
+            &self.bluetooth.snapshot(),
             time.as_deref(),
+            blink_on,
             &mut self.display.cropped(&bar_area),
         )?;
         self.scroller
