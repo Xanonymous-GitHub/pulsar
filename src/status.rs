@@ -61,14 +61,18 @@ pub struct WifiStatus {
     pub ip: Option<Ipv4Addr>,
 }
 
-/// Turns a signal strength into 0 to 4 bars (the usual phone-style scale).
+/// Number of levels of the signal icon (0 is no usable signal, so there are one more values).
+pub const SIGNAL_LEVELS: u8 = 5;
+
+/// Turns a signal strength into 0 to [`SIGNAL_LEVELS`] bars (the usual phone-style scale).
 #[must_use]
 pub const fn signal_bars(rssi_dbm: i32) -> u8 {
     match rssi_dbm {
-        -55.. => 4,
-        -65..=-56 => 3,
-        -75..=-66 => 2,
-        -85..=-76 => 1,
+        -55.. => 5,
+        -62..=-56 => 4,
+        -69..=-63 => 3,
+        -76..=-70 => 2,
+        -85..=-77 => 1,
         _ => 0,
     }
 }

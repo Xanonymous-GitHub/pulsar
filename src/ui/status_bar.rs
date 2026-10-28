@@ -1,31 +1,41 @@
-//! The status bar: two lines of text (network and clock, signal) and signal bars.
+//! The status bar: two lines. The first has the network name (or what the link is doing) and,
+//! while connected, a band badge and signal bars at its right. The second has the local time;
+//! its right side is free for more icons.
 //!
 //! Like [`ScrollingText`](super::scroll::ScrollingText) it draws onto any [`DrawTarget`], so it
 //! knows nothing about the display hardware.
 
-use core::fmt::Write as _;
-
 use embedded_graphics::mono_font::MonoTextStyle;
-use embedded_graphics::mono_font::ascii::FONT_6X10;
+use embedded_graphics::mono_font::ascii::{FONT_4X6, FONT_6X10};
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
 
-use crate::status::{Band, LinkState, WifiStatus, signal_bars};
+use crate::status::{Band, LinkState, SIGNAL_LEVELS, WifiStatus, signal_bars};
 
 /// Vertical distance between the two text lines.
 const LINE_HEIGHT: i32 = 12;
-/// Characters that fit on one line (128 px wide screen, 6 px per character).
-const LINE_CHARS: usize = 21;
-const BAR_COUNT: u8 = 4;
+/// Space between the network name, the band badge and the signal bars.
+const ICON_GAP: i32 = 3;
+
 const BAR_WIDTH: u32 = 3;
-const BAR_GAP: u32 = 2;
+const BAR_GAP: u32 = 1;
 /// Height of the smallest bar; each further bar is this much taller.
 const BAR_STEP: u32 = 2;
+/// Width of the whole signal icon.
+const BARS_WIDTH: u32 = SIGNAL_LEVELS as u32 * (BAR_WIDTH + BAR_GAP) - BAR_GAP;
+/// Row of the lowest pixel of the first line's icons. The tallest bar then spans the 10 px of
+/// the text next to it.
+const ICON_BOTTOM: i32 = LINE_HEIGHT - 3;
 
-/// Characters of the clock text (`HH:MM:SS`).
-const CLOCK_CHARS: usize = 8;
+/// Characters of the longest band label (`2.4G`); every badge is as wide as this one so the
+/// room for the network name does not change with the band.
+const BADGE_CHARS: u32 = 4;
+/// Blank pixels around the label inside the badge.
+const BADGE_PADDING: u32 = 1;
+const BADGE_WIDTH: u32 = BADGE_CHARS * FONT_4X6.character_size.width + 2 * BADGE_PADDING;
+const BADGE_HEIGHT: u32 = FONT_4X6.character_size.height + 2 * BADGE_PADDING;
 
 /// Draws a [`WifiStatus`] and the time into the area it is given.
 pub struct StatusBar {
@@ -42,7 +52,7 @@ impl StatusBar {
     }
 
     /// Draws `status` onto `target`, starting at its top left corner. `time` is the local time
-    /// of day (`HH:MM:SS`) shown at the right of the first line, or `None` until the clock is set.
+    /// of day (`HH:MM:SS`) shown at the left of the second line, or `None` until the clock is set.
     ///
     /// # Errors
     ///
@@ -56,79 +66,32 @@ impl StatusBar {
     where
         D: DrawTarget<Color = BinaryColor>,
     {
-        let mut line = heapless::String::<LINE_CHARS>::new();
+        // Line 1: what the link is doing, or, once connected, the network name with the icons.
+        if let Some(text) = idle_text(status.state) {
+            self.print(text, 0, target)?;
+        } else {
+            let area = target.bounding_box();
+            let right = area.top_left.x + area.size.width.cast_signed();
+            let bars_left = draw_bars(status.rssi_dbm.map_or(0, signal_bars), right, target)?;
+            let badge_left = draw_badge(status.band, bars_left - ICON_GAP, target)?;
 
-        // Line 1: the network name, or a placeholder until it is known. With a clock the name
-        // gets less room (the clock plus one space is left out).
-        let name_chars = if time.is_some() {
-            LINE_CHARS - CLOCK_CHARS - 1
-        } else {
-            LINE_CHARS
-        };
-        if status.ssid.is_empty() {
-            let _ = line.push_str("Wi-Fi");
-        } else {
-            // Names longer than the room are cut (by characters, not bytes).
-            for character in status.ssid.chars().take(name_chars) {
-                let _ = line.push(character);
-            }
+            // The name gets what the icons leave, cut by characters (not bytes).
+            let room = badge_left - ICON_GAP;
+            let name_chars = usize::try_from(room.max(0).cast_unsigned()).unwrap_or(0)
+                / usize::try_from(self.text.font.character_size.width).unwrap_or(1);
+            let name = if status.ssid.is_empty() {
+                "Wi-Fi"
+            } else {
+                &status.ssid
+            };
+            self.print(cut(name, name_chars), 0, target)?;
         }
-        self.print(&line, 0, target)?;
+
+        // Line 2: the time.
         if let Some(time) = time {
-            self.print_right(time, 0, target)?;
-        }
-
-        // Line 2: signal and band, or what the link is doing.
-        line.clear();
-        match status.state {
-            LinkState::Idle => {
-                let _ = line.push_str("Off");
-            }
-            LinkState::NoCredentials => {
-                let _ = line.push_str("No credentials");
-            }
-            LinkState::Connecting => {
-                let _ = line.push_str("Connecting...");
-            }
-            LinkState::Failed => {
-                let _ = line.push_str("Wi-Fi failed");
-            }
-            LinkState::Connected => {
-                let _ = match status.rssi_dbm {
-                    Some(rssi) => write!(line, "{rssi} dBm"),
-                    None => write!(line, "-- dBm"),
-                };
-                match status.band {
-                    Some(Band::Ghz2_4) => {
-                        let _ = line.push_str(" 2.4G");
-                    }
-                    Some(Band::Ghz5) => {
-                        let _ = line.push_str(" 5G");
-                    }
-                    None => {}
-                }
-            }
-        }
-        self.print(&line, LINE_HEIGHT, target)?;
-
-        if status.state == LinkState::Connected {
-            draw_bars(status.rssi_dbm.map_or(0, signal_bars), target)?;
+            self.print(time, LINE_HEIGHT, target)?;
         }
         Ok(())
-    }
-
-    /// Prints `text` so that it ends at the right edge of `target`.
-    fn print_right<D>(&self, text: &str, y: i32, target: &mut D) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = BinaryColor>,
-    {
-        let width = i32::try_from(text.chars().count())
-            .unwrap_or(0)
-            .saturating_mul(self.text.font.character_size.width.cast_signed());
-        let right = target.bounding_box().size.width.cast_signed();
-        Text::with_baseline(text, Point::new(right - width, y), self.text, Baseline::Top)
-            .draw(target)
-            .map(drop)
     }
 
     fn print<D>(&self, text: &str, y: i32, target: &mut D) -> Result<(), D::Error>
@@ -147,27 +110,84 @@ impl Default for StatusBar {
     }
 }
 
-/// Draws `lit` of [`BAR_COUNT`] growing bars at the right edge of the second line.
-/// Bars that are not lit are shown as a single pixel row so the scale stays visible.
-fn draw_bars<D>(lit: u8, target: &mut D) -> Result<(), D::Error>
+/// What to show in place of the network name while there is no link, or `None` when connected.
+const fn idle_text(state: LinkState) -> Option<&'static str> {
+    match state {
+        LinkState::Idle => Some("Off"),
+        LinkState::NoCredentials => Some("No credentials"),
+        LinkState::Connecting => Some("Connecting..."),
+        LinkState::Failed => Some("Wi-Fi failed"),
+        LinkState::Connected => None,
+    }
+}
+
+/// The first `chars` characters of `text`.
+fn cut(text: &str, chars: usize) -> &str {
+    let end = text
+        .char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(index, _)| index);
+    &text[..end]
+}
+
+/// Draws `lit` of [`SIGNAL_LEVELS`] growing bars with their right end at `right`. Bars that are
+/// not lit are shown as a single pixel row so the scale stays visible.
+///
+/// Returns the x position of the left end of the icon.
+fn draw_bars<D>(lit: u8, right: i32, target: &mut D) -> Result<i32, D::Error>
 where
     D: DrawTarget<Color = BinaryColor>,
 {
-    let area = target.bounding_box();
-    let total_width = u32::from(BAR_COUNT) * (BAR_WIDTH + BAR_GAP) - BAR_GAP;
-    let bottom = 2 * LINE_HEIGHT - 3;
-    let mut left = area.top_left.x + (area.size.width - total_width).cast_signed();
+    let icon_left = right - BARS_WIDTH.cast_signed();
+    let mut left = icon_left;
 
-    for index in 0..BAR_COUNT {
-        let full_height = BAR_STEP * (u32::from(index) + 2);
+    for index in 0..SIGNAL_LEVELS {
+        let full_height = BAR_STEP * (u32::from(index) + 1);
         let height = if index < lit { full_height } else { 1 };
         Rectangle::new(
-            Point::new(left, bottom - height.cast_signed() + 1),
+            Point::new(left, ICON_BOTTOM - height.cast_signed() + 1),
             Size::new(BAR_WIDTH, height),
         )
         .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
         .draw(target)?;
         left += (BAR_WIDTH + BAR_GAP).cast_signed();
     }
-    Ok(())
+    Ok(icon_left)
+}
+
+/// Draws the band as a light badge with dark text, ending at `right`. Nothing is drawn while the
+/// band is unknown, but the room is still used.
+///
+/// Returns the x position of the left end of the badge.
+fn draw_badge<D>(band: Option<Band>, right: i32, target: &mut D) -> Result<i32, D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let left = right - BADGE_WIDTH.cast_signed();
+    let Some(band) = band else {
+        return Ok(left);
+    };
+    let label = match band {
+        Band::Ghz2_4 => "2.4G",
+        Band::Ghz5 => "5G",
+    };
+    let top = ICON_BOTTOM - BADGE_HEIGHT.cast_signed() + 1;
+
+    Rectangle::new(Point::new(left, top), Size::new(BADGE_WIDTH, BADGE_HEIGHT))
+        .into_styled(PrimitiveStyle::with_fill(BinaryColor::On))
+        .draw(target)?;
+
+    // Centre the label (shorter than `BADGE_CHARS` for 5 GHz) in the badge.
+    let label_width = i32::try_from(label.len())
+        .unwrap_or(0)
+        .saturating_mul(FONT_4X6.character_size.width.cast_signed());
+    let label_left = left + (BADGE_WIDTH.cast_signed() - label_width) / 2;
+    Text::with_baseline(
+        label,
+        Point::new(label_left, top + BADGE_PADDING.cast_signed()),
+        MonoTextStyle::new(&FONT_4X6, BinaryColor::Off),
+        Baseline::Top,
+    )
+    .draw(target)?;
+    Ok(left)
 }
