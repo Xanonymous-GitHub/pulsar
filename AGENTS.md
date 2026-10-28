@@ -30,6 +30,13 @@ Firmware for the Seeed XIAO ESP32-C5 on the Seeeduino XIAO Expansion Board. Rust
 - Asia/Taipei is a fixed UTC+8 (no daylight saving), so `clock::LocalTime` uses an offset and needs no time zone database or `setenv("TZ")`.
 - rust-analyzer reports false "can't find crate for core/std" for this target; trust `cargo build`.
 - The display is an SSD1306 128x64 on I2C (XIAO D4 = SDA = GPIO23, D5 = SCL = GPIO24); the user LED is GPIO27.
+- Bluetooth is NimBLE through `esp32-nimble` (`src/bluetooth/`, `docs/bluetooth.md`). `BLEDevice::take()` runs `nvs_flash_init()` on the plain `nvs` partition; never set `BT_NIMBLE_NVS_PERSIST` or `CONFIG_NVS_ENCRYPTION`. Bonds are saved in the secret store (`bonds.rs`) as raw NimBLE structs with a length check, so an ESP-IDF bump may force phones to re-pair.
+- With `BT_NIMBLE_EXT_ADV=y`, `esp32-nimble` swaps in `BLEExtAdvertising`: no restart after a connect or disconnect (`advertising::restart` does it), no Flags field (added by our vendored patch; without it phone Settings pages do not list the board), and `complete_service` writes the wrong AD type.
+- Any advertising set makes Wi-Fi's two-band scan take about 24 s instead of 13 s (not interval- or PHY-related), so advertising starts after Wi-Fi's first attempt (`BLE_WIFI_WAIT`). `BlockingWifi::connect` has a fixed 15 s timeout, so `wifi::join` waits for the events itself (`WIFI_CONNECT_TIMEOUT`).
+- `esp32-nimble` is vendored in `vendor/esp32-nimble` (`[patch.crates-io]`, see `PATCHES.md` there): upstream `todo!()`s on pairing actions a peer can trigger (remote abort) and races on the subscriber list. Drop it when upstream fixes both; re-apply the patches when bumping the crate.
+- Restore PEER_SEC bond records with `ble_store_write_peer_sec` (it loads the IRK into the controller; plain `ble_store_write` does not), and export only struct fields (the C padding is uninitialised).
+- `espflash monitor` right after flashing can fail with `Broken pipe` (the USB port re-enumerates): wait a few seconds and retry.
+- On this nightly `Atomic*::fetch_update` is renamed `try_update`; the deprecation fails `clippy -D warnings`.
 - `eim_config.toml` and the Espressif Installation Manager install are not used by the Rust build.
 
 ## Useful references

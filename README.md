@@ -7,6 +7,7 @@ What it does:
 - Joins a **WPA3-Personal** Wi-Fi network on **2.4 GHz or 5 GHz** (Wi-Fi 6 is allowed on both bands). It prefers 5 GHz when that signal is within 10 dB of the best 2.4 GHz one (`WIFI_PREFER_5GHZ_MARGIN_DB` in `src/config.rs`), and uses 2.4 GHz otherwise. The device name on the network is `pulsar`.
 - Shows the SSID, a 5 GHz / 2.4 GHz badge and a 5-level signal icon on the first line of the 0.96" OLED, the local time (Asia/Taipei, from SNTP) on the second, and the Taipei weather forecast scrolling under them. The forecast comes over HTTPS from Open-Meteo every 15 minutes, so a report on the screen shows that Wi-Fi, DNS, TLS 1.3, the certificate chain and the clock all work. Without internet the last report stays, marked `(old)` after 35 minutes, and updates are retried with a growing delay until the connection is back.
 - Has a general HTTP/HTTPS client (`src/http.rs`): HTTP/1.1 with TLS 1.3 (TLS 1.2 as a fallback), the Mozilla root certificates and certificate date checks. HTTP/2 and HTTP/3 are not available in ESP-IDF.
+- Speaks **Bluetooth LE 5** (NimBLE): a phone pairs with a six-digit passkey shown on the OLED (LE Secure Connections only), and a paired phone can read and subscribe to the Wi-Fi status and the weather text. The board also advertises on the LE Coded PHY for long range, listens with extended scanning, and keeps the bonds in the encrypted secret store. A Bluetooth icon at the right of the second status line shows the state: filled = a phone is connected, hollow = none, steady = paired, blinking = not paired yet. The chip's features and which ones are on are listed in [docs/bluetooth.md](docs/bluetooth.md).
 - Blinks the user LED.
 - Keeps the Wi-Fi password in an encrypted NVS partition. See [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md).
 
@@ -36,6 +37,12 @@ On the first run the credentials are stored on the chip. Later builds can leave 
 The secret store refuses to open unless flash encryption is on. The `insecure-dev-store` feature lets it open without it, for testing on your desk only. It logs a warning at every boot. Follow [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md) to turn flash encryption on and drop the feature.
 
 For a release build, add `--release`.
+
+## Pairing a phone
+
+1. Open a BLE app such as nRF Connect and connect to `pulsar`. The board starts advertising a few seconds after boot, when Wi-Fi has finished its first connection attempt.
+2. Read the `wifi` or `weather` characteristic of the Pulsar service (UUID `5d1a0001-7e3f-4c53-9a6e-9f1c2b8d4a10`). The phone asks to pair.
+3. Type the six-digit passkey that appears next to the Bluetooth icon on the OLED. The icon turns steady. The phone is bonded, so it reconnects without a passkey, also after a reboot.
 
 ## Serial monitor without a terminal
 
@@ -72,12 +79,13 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/board.rs` | The pin map for the board and expansion board. |
 | `src/wifi.rs` | Credentials, WPA3 station, dual-band setup, reconnect with backoff. |
 | `src/secrets.rs` | The encrypted secret store on top of NVS. |
-| `src/status.rs` | The Wi-Fi status shared between Wi-Fi and the screen. |
+| `src/status.rs` | The Wi-Fi and Bluetooth status shared between the radio code and the screen. |
+| `src/bluetooth/` | Bluetooth LE: stack set-up and pairing (`mod.rs`), advertising sets, GATT services, bonds in the secret store, scanning. |
 | `src/clock.rs` | SNTP and the local time of day. |
 | `src/http.rs` | The HTTP/HTTPS client. |
 | `src/weather.rs` | Fetches the forecast and turns it into the scrolling text. |
 | `src/message.rs` | The scrolling text shared between the weather thread and the screen. |
-| `src/ui/` | The screen: status bar (with the clock) and scrolling text. |
+| `src/ui/` | The screen: status bar (Wi-Fi, clock, Bluetooth icon) and scrolling text. |
 | `src/led.rs` | The blinking LED. |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
 | `partitions.csv` | Flash layout, including the `secrets` and `nvs_keys` partitions. |

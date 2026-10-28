@@ -9,7 +9,7 @@ repository does it for you. Only you run these steps.
 | Where | Protection |
 | --- | --- |
 | Your computer | The password only lives in the shell variable `PULSAR_WIFI_PASSWORD` while you build. It is not in any tracked file. |
-| `secrets` partition (encrypted NVS) | The password is encrypted with keys stored in the `nvs_keys` partition. |
+| `secrets` partition (encrypted NVS) | The password, and the Bluetooth bonds (the keys of paired phones, see `docs/bluetooth.md`), are encrypted with keys stored in the `nvs_keys` partition. |
 | `nvs_keys` partition | **Only protected if flash encryption is on.** Without it, anyone with the flash contents can read the keys and decrypt the password. |
 | RAM | Wi-Fi settings are kept in RAM only (`config NVS flash: disabled` in the boot log). The password buffers are wiped when dropped. |
 
@@ -108,8 +108,10 @@ signed, and disabling the ROM download mode. Both are irreversible too. They are
 
 * `CONFIG_NVS_ENCRYPTION` is left off in `sdkconfig.defaults.secure` on purpose. On the ESP32-C5 it
   selects the HMAC key scheme by default, and the first `nvs_flash_init()` would burn an HMAC key
-  into an eFuse block without asking. The firmware never calls `nvs_flash_init`; it opens its own
-  encrypted partition with the keys in `nvs_keys`.
+  into an eFuse block without asking. The firmware opens its own encrypted partition with the keys
+  in `nvs_keys`. Bluetooth start-up (`esp32-nimble`) does call `nvs_flash_init` for the plain `nvs`
+  partition, which only holds Wi-Fi/radio calibration. That is safe while `CONFIG_NVS_ENCRYPTION`
+  stays off: nothing is burned, and nothing secret is written there (bonds go to `secrets`).
 * An HMAC-based NVS scheme (keys derived inside the chip from an eFuse key) would protect the
   password **without** full flash encryption. It is not implemented here because `esp-idf-svc`
   does not expose it. It is the natural next step if you want to avoid flash encryption.
