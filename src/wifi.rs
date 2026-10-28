@@ -56,8 +56,8 @@ use esp_idf_svc::wifi::{
 use zeroize::Zeroizing;
 
 use crate::config::{
-    HOSTNAME, WIFI_BACKOFF_MAX, WIFI_BACKOFF_START, WIFI_FAILED_AFTER, WIFI_POLL_PERIOD,
-    WIFI_PREFER_5GHZ_MARGIN_DB, WIFI_SECRET_KEY, WIFI_STACK_BYTES,
+    HOSTNAME, WIFI_BACKOFF_MAX, WIFI_BACKOFF_START, WIFI_CONNECT_TIMEOUT, WIFI_FAILED_AFTER,
+    WIFI_POLL_PERIOD, WIFI_PREFER_5GHZ_MARGIN_DB, WIFI_SECRET_KEY, WIFI_STACK_BYTES,
 };
 use crate::platform;
 use crate::secrets::{self, SecretStore};
@@ -292,9 +292,21 @@ fn supervise(wifi: &mut BlockingWifi<EspWifi<'static>>, status: &SharedStatus) {
 }
 
 /// Connects to the access point and waits for an IP address.
+///
+/// `BlockingWifi::connect` and `wait_netif_up` give up after a fixed 15 seconds each. That is not
+/// enough here: the scan of both bands takes about 11 seconds on its own, and Bluetooth shares the
+/// 2.4 GHz radio and slows it further. So the board waits for the events itself, with the
+/// budget in [`WIFI_CONNECT_TIMEOUT`].
 fn join(wifi: &mut BlockingWifi<EspWifi<'static>>) -> Result<(), EspError> {
-    wifi.connect()?;
-    wifi.wait_netif_up()
+    wifi.wifi_mut().connect()?;
+    wifi.wifi_wait_while(
+        || wifi.wifi().is_connected().map(|connected| !connected),
+        Some(WIFI_CONNECT_TIMEOUT),
+    )?;
+    wifi.ip_wait_while(
+        || wifi.wifi().is_up().map(|up| !up),
+        Some(WIFI_CONNECT_TIMEOUT),
+    )
 }
 
 /// Publishes signal, band and address every [`WIFI_POLL_PERIOD`] until the connection is lost.

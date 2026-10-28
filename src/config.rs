@@ -18,6 +18,10 @@ pub const SCROLL_STEP: i32 = 2;
 /// Time between two frames of the screen.
 pub const FRAME_PERIOD: Duration = Duration::from_millis(40);
 
+/// Time of one on-and-off cycle of the Bluetooth icon while it blinks (not paired yet). The icon is
+/// on for the first half and off for the second.
+pub const BLUETOOTH_BLINK_PERIOD: Duration = Duration::from_secs(1);
+
 /// Height of the Wi-Fi status bar at the top of the screen, in pixels. The scroller gets the rest.
 pub const STATUS_BAR_HEIGHT: u32 = 24;
 
@@ -35,6 +39,11 @@ pub const WIFI_STACK_BYTES: usize = 8 * 1024;
 
 /// How often the Wi-Fi supervisor refreshes signal strength and address while connected.
 pub const WIFI_POLL_PERIOD: Duration = Duration::from_secs(2);
+
+/// How long one connection attempt may take, counted from the start of the scan, for the link and
+/// for the IP address (each). Scanning both bands takes about 11 seconds, and Bluetooth, which
+/// shares the 2.4 GHz radio, makes it longer.
+pub const WIFI_CONNECT_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Consecutive failed connection attempts before the status shows "failed". Retrying goes on.
 pub const WIFI_FAILED_AFTER: u32 = 3;
@@ -105,3 +114,51 @@ pub const HTTP_MAX_BODY_BYTES: usize = 64 * 1024;
 /// How long an HTTPS request waits for the clock to be set before it gives up. Certificates cannot
 /// be checked while the clock still shows 1970.
 pub const HTTP_CLOCK_WAIT: Duration = Duration::from_secs(30);
+
+/// Name of the secret that holds the Bluetooth bonds (the keys of the paired phones).
+pub const BLE_BONDS_SECRET_KEY: &str = "ble-bonds";
+
+/// How long Bluetooth waits for Wi-Fi to finish its first connection attempt before it starts
+/// advertising. While an advertising set is on, Wi-Fi's scan of both bands takes about 24 seconds
+/// instead of 13 (measured, whatever the advertising interval and PHY), so Wi-Fi goes first.
+/// Bluetooth starts at once when Wi-Fi is not trying to connect at all.
+pub const BLE_WIFI_WAIT: Duration = Duration::from_secs(60);
+
+/// Time between two advertising packets of each set, in milliseconds. Shorter is found faster
+/// and costs more power.
+pub const BLE_ADV_INTERVAL_MS: u32 = 100;
+
+/// The largest ATT payload (MTU) the board offers a phone, in bytes. The phone picks the final
+/// value; 512 is the largest value an attribute can have (the MTU itself may be up to 527).
+pub const BLE_PREFERRED_MTU: u16 = 512;
+
+/// How often the Bluetooth thread looks for something to publish: new Wi-Fi or weather text for
+/// the phone, and bonds that have to be saved.
+pub const BLE_POLL_PERIOD: Duration = Duration::from_secs(1);
+
+/// Stack size of the Bluetooth thread, in bytes.
+pub const BLE_STACK_BYTES: usize = 6 * 1024;
+
+/// How often the Bluetooth thread looks at Wi-Fi while it waits for Wi-Fi's first connection
+/// attempt to end, see [`BLE_WIFI_WAIT`].
+pub const BLE_WIFI_POLL: Duration = Duration::from_millis(250);
+
+/// The manufacturer name in the Device Information service.
+pub const BLE_MANUFACTURER: &str = "pulsar";
+
+/// The model name in the Device Information service.
+pub const BLE_MODEL: &str = "XIAO ESP32-C5";
+
+/// How long one pass of the Observer (scanning) lasts, as the default for `bluetooth::scan`.
+pub const BLE_SCAN_DURATION: Duration = Duration::from_secs(5);
+
+/// Scan interval of the Observer, in milliseconds.
+pub const BLE_SCAN_INTERVAL_MS: u16 = 100;
+
+/// Scan window of the Observer, in milliseconds. It cannot be longer than the interval; a shorter
+/// window leaves more radio time for Wi-Fi.
+pub const BLE_SCAN_WINDOW_MS: u16 = 50;
+
+/// A scan once advertising has started, to show in the log that the Observer works.
+/// `Duration::ZERO` turns it off.
+pub const BLE_BOOT_SCAN: Duration = Duration::from_secs(3);
