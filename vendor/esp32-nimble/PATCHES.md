@@ -17,4 +17,9 @@ marked `PATCH(pulsar)` in the source. Drop this directory (and `[patch.crates-io
    extended-advertising API had no way to add the Flags field. Without it, phones' Bluetooth
    settings pages do not list the device.
 
+4. **`src/server/ble_characteristic.rs`, `send_value`:** `ble_att_mtu(conn) - 3` underflowed when
+   the phone disconnected between `notify()` copying the subscriber list and sending (the MTU of
+   a missing connection is 0), which panics in builds with overflow checks. It now saturates, so
+   the existing `mtu == 0` check returns an error instead.
+
 Removed from the copy: examples, CI files, the toolchain file and the dev-dependencies.

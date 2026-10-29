@@ -40,7 +40,7 @@ For a release build, add `--release`.
 
 ## Pairing a phone
 
-1. Open a BLE app such as nRF Connect and connect to `pulsar`. The board starts advertising a few seconds after boot, when Wi-Fi has finished its first connection attempt.
+1. Open a BLE app such as nRF Connect and connect to `pulsar`. The board starts advertising once Wi-Fi has finished its first connection attempt, about 16 seconds after boot (up to 60 seconds if Wi-Fi is slow). The Bluetooth icon appears when it does.
 2. Read the `wifi` or `weather` characteristic of the Pulsar service (UUID `5d1a0001-7e3f-4c53-9a6e-9f1c2b8d4a10`). The phone asks to pair.
 3. Type the six-digit passkey that appears next to the Bluetooth icon on the OLED. The icon turns steady. The phone is bonded, so it reconnects without a passkey, also after a reboot.
 
@@ -74,7 +74,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 
 | Path | Contents |
 |---|---|
-| `src/main.rs` | Wiring only: start the LED, the screen and Wi-Fi. |
+| `src/main.rs` | Wiring only: start the LED, the screen, Wi-Fi and Bluetooth. |
 | `src/config.rs` | Every tunable constant (periods, stack sizes, text, hostname). |
 | `src/board.rs` | The pin map for the board and expansion board. |
 | `src/wifi.rs` | Credentials, WPA3 station, dual-band setup, reconnect with backoff. |

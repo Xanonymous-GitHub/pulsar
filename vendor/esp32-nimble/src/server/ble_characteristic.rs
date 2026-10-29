@@ -309,7 +309,9 @@ impl BLECharacteristic {
     }
 
     fn send_value(&self, value: &[u8], conn_handle: u16, flag: NimbleSub) -> Result<(), BLEError> {
-        let mtu = unsafe { sys::ble_att_mtu(conn_handle) - 3 };
+        // PATCH(pulsar): `ble_att_mtu` returns 0 for a connection that has just gone away, and
+        // `0 - 3` panics (overflow checks) in debug builds. See PATCHES.md.
+        let mtu = unsafe { sys::ble_att_mtu(conn_handle) }.saturating_sub(3);
         if mtu == 0 || flag.is_empty() {
             return BLEError::convert(sys::BLE_HS_EINVAL);
         }
