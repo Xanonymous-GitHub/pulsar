@@ -20,6 +20,7 @@ anyhow            = "1.0.104"
 display-interface = "0.5.0"
 embedded-graphics = "0.8.2"
 esp-idf-svc       = "0.53.0"
+esp32-nimble      = "0.13.0"
 heapless          = { version = "0.9.3", features = ["zeroize"] }
 # `max_level_info` removes debug/trace logging from the binary, so a debug line inside a
 # dependency can never print a Wi-Fi configuration.
@@ -32,6 +33,11 @@ zeroize           = "1.9.1"
 
 [build-dependencies]
 embuild = "0.33.7"
+
+[patch.crates-io]
+# esp32-nimble 0.13.0 plus two fixes (a remotely triggerable `todo!()` panic and a data race on
+# the subscriber list), see vendor/esp32-nimble/PATCHES.md.
+esp32-nimble = { path = "vendor/esp32-nimble" }
 
 [lints.rust]
 unsafe_code = "deny"

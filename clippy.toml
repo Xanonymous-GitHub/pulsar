@@ -1,0 +1,2 @@
+# Names that `clippy::doc_markdown` must not ask to put in backticks. ".." keeps clippy's own list.
+doc-valid-idents = ["NimBLE", ".."]

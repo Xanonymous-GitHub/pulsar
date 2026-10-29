@@ -1,6 +1,11 @@
 //! The status bar: two lines. The first has the network name (or what the link is doing) and,
-//! while connected, a band badge and signal bars at its right. The second has the local time;
-//! its right side is free for more icons.
+//! while connected, a band badge and signal bars at its right. The second has the local time and,
+//! at its right, the Bluetooth icon (with the passkey next to it while a phone is pairing).
+//!
+//! The Bluetooth icon follows two rules. **Filled** means a phone is connected, **hollow** means
+//! none is. **Steady** means the phone is paired (bonded and encrypted), **blinking** means it is
+//! not, yet. A hollow frame with a cross means Bluetooth failed to start, and no icon means it is
+//! off.
 //!
 //! Like [`ScrollingText`](super::scroll::ScrollingText) it draws onto any [`DrawTarget`], so it
 //! knows nothing about the display hardware.
@@ -12,7 +17,7 @@ use embedded_graphics::prelude::*;
 use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
 use embedded_graphics::text::{Baseline, Text};
 
-use crate::status::{Band, LinkState, SIGNAL_LEVELS, WifiStatus, signal_bars};
+use crate::status::{Band, BtState, BtStatus, LinkState, SIGNAL_LEVELS, WifiStatus, signal_bars};
 
 /// Vertical distance between the two text lines.
 const LINE_HEIGHT: i32 = 12;
@@ -37,7 +42,42 @@ const BADGE_PADDING: u32 = 1;
 const BADGE_WIDTH: u32 = BADGE_CHARS * FONT_4X6.character_size.width + 2 * BADGE_PADDING;
 const BADGE_HEIGHT: u32 = FONT_4X6.character_size.height + 2 * BADGE_PADDING;
 
-/// Draws a [`WifiStatus`] and the time into the area it is given.
+/// A passkey has six digits (leading zeros included).
+const PASSKEY_DIGITS: u32 = 6;
+/// Width of the passkey in the status bar's font.
+const PASSKEY_WIDTH: i32 = (PASSKEY_DIGITS * FONT_6X10.character_size.width).cast_signed();
+
+const BT_ICON_WIDTH: u32 = 9;
+const BT_ICON_HEIGHT: u32 = 11;
+/// The Bluetooth rune, 5 by 9 pixels (`#` is a lit pixel).
+const BT_RUNE: [&str; 9] = [
+    "..#..", "..##.", "#.#.#", ".###.", "..#..", ".###.", "#.#.#", "..##.", "..#..",
+];
+/// A cross, 5 by 5 pixels, shown instead of the rune when Bluetooth failed.
+const BT_CROSS: [&str; 5] = ["#...#", ".#.#.", "..#..", ".#.#.", "#...#"];
+
+/// How the Bluetooth icon looks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BtLook {
+    /// A filled box with a dark rune: a phone is connected.
+    Filled,
+    /// A frame with a light rune: no phone is connected.
+    Hollow,
+    /// A frame with a cross: Bluetooth could not start.
+    Failed,
+}
+
+/// The look of the icon for `state`, and whether it blinks. `None` means no icon.
+const fn bluetooth_icon(state: BtState) -> Option<(BtLook, bool)> {
+    match state {
+        BtState::Off => None,
+        BtState::Failed => Some((BtLook::Failed, false)),
+        BtState::Waiting { bonded } => Some((BtLook::Hollow, !bonded)),
+        BtState::Connected { secured } => Some((BtLook::Filled, !secured)),
+    }
+}
+
+/// Draws a [`WifiStatus`], a [`BtStatus`] and the time into the area it is given.
 pub struct StatusBar {
     text: MonoTextStyle<'static, BinaryColor>,
 }
@@ -51,8 +91,10 @@ impl StatusBar {
         }
     }
 
-    /// Draws `status` onto `target`, starting at its top left corner. `time` is the local time
-    /// of day (`HH:MM:SS`) shown at the left of the second line, or `None` until the clock is set.
+    /// Draws `status` and `bluetooth` onto `target`, starting at its top left corner. `time` is
+    /// the local time of day (`HH:MM:SS`) shown at the left of the second line, or `None` until
+    /// the clock is set. `blink_on` is the phase of the blinking Bluetooth icon: it is drawn
+    /// while true and skipped while false (a steady icon ignores it).
     ///
     /// # Errors
     ///
@@ -60,7 +102,9 @@ impl StatusBar {
     pub fn draw<D>(
         &self,
         status: &WifiStatus,
+        bluetooth: &BtStatus,
         time: Option<&str>,
+        blink_on: bool,
         target: &mut D,
     ) -> Result<(), D::Error>
     where
@@ -87,9 +131,26 @@ impl StatusBar {
             self.print(cut(name, name_chars), 0, target)?;
         }
 
-        // Line 2: the time.
+        // Line 2: the time at the left, the Bluetooth icon (and a passkey) at the right.
         if let Some(time) = time {
             self.print(time, LINE_HEIGHT, target)?;
+        }
+        let right = {
+            let area = target.bounding_box();
+            area.top_left.x + area.size.width.cast_signed()
+        };
+        let icon_left = right - BT_ICON_WIDTH.cast_signed();
+        if let Some((look, blinking)) = bluetooth_icon(bluetooth.state)
+            && (blink_on || !blinking)
+        {
+            draw_bluetooth(look, icon_left, target)?;
+        }
+        if let Some(passkey) = bluetooth.passkey {
+            self.print_at(
+                &format!("{passkey:06}"),
+                Point::new(icon_left - ICON_GAP - PASSKEY_WIDTH, LINE_HEIGHT),
+                target,
+            )?;
         }
         Ok(())
     }
@@ -98,7 +159,14 @@ impl StatusBar {
     where
         D: DrawTarget<Color = BinaryColor>,
     {
-        Text::with_baseline(text, Point::new(0, y), self.text, Baseline::Top)
+        self.print_at(text, Point::new(0, y), target)
+    }
+
+    fn print_at<D>(&self, text: &str, at: Point, target: &mut D) -> Result<(), D::Error>
+    where
+        D: DrawTarget<Color = BinaryColor>,
+    {
+        Text::with_baseline(text, at, self.text, Baseline::Top)
             .draw(target)
             .map(drop)
     }
@@ -190,4 +258,55 @@ where
     )
     .draw(target)?;
     Ok(left)
+}
+
+/// Draws the Bluetooth icon with its left edge at `left`, on the second line.
+fn draw_bluetooth<D>(look: BtLook, left: i32, target: &mut D) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = BinaryColor>,
+{
+    let top_left = Point::new(left, LINE_HEIGHT);
+    let size = Size::new(BT_ICON_WIDTH, BT_ICON_HEIGHT);
+    let (box_style, glyph_color) = match look {
+        BtLook::Filled => (PrimitiveStyle::with_fill(BinaryColor::On), BinaryColor::Off),
+        BtLook::Hollow | BtLook::Failed => (
+            PrimitiveStyle::with_stroke(BinaryColor::On, 1),
+            BinaryColor::On,
+        ),
+    };
+    Rectangle::new(top_left, size)
+        .into_styled(box_style)
+        .draw(target)?;
+
+    // Take the four corner pixels away, which rounds the box.
+    let last = Point::new(size.width.cast_signed() - 1, size.height.cast_signed() - 1);
+    target.draw_iter(
+        [
+            Point::zero(),
+            Point::new(last.x, 0),
+            Point::new(0, last.y),
+            last,
+        ]
+        .map(|corner| Pixel(top_left + corner, BinaryColor::Off)),
+    )?;
+
+    let (glyph, glyph_width): (&[&str], i32) = match look {
+        BtLook::Failed => (&BT_CROSS, 5),
+        BtLook::Filled | BtLook::Hollow => (&BT_RUNE, 5),
+    };
+    let glyph_height = i32::try_from(glyph.len()).unwrap_or(0);
+    // Centred in the box.
+    let origin = top_left
+        + Point::new(
+            (size.width.cast_signed() - glyph_width) / 2,
+            (size.height.cast_signed() - glyph_height) / 2,
+        );
+    target.draw_iter(
+        glyph
+            .iter()
+            .zip(0..)
+            .flat_map(|(row, y)| row.bytes().zip(0..).map(move |(pixel, x)| (pixel, x, y)))
+            .filter(|&(pixel, ..)| pixel == b'#')
+            .map(|(_, x, y)| Pixel(origin + Point::new(x, y), glyph_color)),
+    )
 }

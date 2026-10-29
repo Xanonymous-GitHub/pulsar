@@ -1,7 +1,7 @@
-//! The Wi-Fi status that the network code publishes and the screen shows.
+//! The Wi-Fi and Bluetooth status that the radio code publishes and the screen shows.
 //!
-//! Nothing here touches hardware. [`SharedStatus`] is a cheap handle (clone it for every thread
-//! that needs it); the lock is only held while copying a few bytes.
+//! Nothing here touches hardware. [`SharedStatus`] and [`SharedBluetooth`] are cheap handles
+//! (clone them for every thread that needs them); the lock is only held while copying a few bytes.
 
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -77,23 +77,68 @@ pub const fn signal_bars(rssi_dbm: i32) -> u8 {
     }
 }
 
-/// A [`WifiStatus`] shared between threads.
-#[derive(Clone, Debug, Default)]
-pub struct SharedStatus(Arc<Mutex<WifiStatus>>);
+/// How the Bluetooth link is doing. The screen draws one icon for it, see `ui::status_bar`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BtState {
+    /// Bluetooth has not been started.
+    #[default]
+    Off,
+    /// Bluetooth could not be started.
+    Failed,
+    /// Advertising, no phone connected. `bonded` tells whether a paired phone is known.
+    Waiting {
+        /// At least one bond is stored.
+        bonded: bool,
+    },
+    /// A phone is connected. `secured` is true once the link is encrypted with a stored bond.
+    Connected {
+        /// Pairing is done: the link is encrypted and the phone is bonded.
+        secured: bool,
+    },
+}
 
-impl SharedStatus {
+/// A snapshot of the Bluetooth link.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BtStatus {
+    /// How the link is doing.
+    pub state: BtState,
+    /// The six-digit passkey to type on the phone while a pairing is going on. It is meant for
+    /// the screen only and is never logged.
+    pub passkey: Option<u32>,
+}
+
+/// A status value shared between threads.
+#[derive(Debug, Default)]
+pub struct Shared<T>(Arc<Mutex<T>>);
+
+// Not derived: a derive would also require `T: Clone`, but cloning the handle only clones the `Arc`.
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T: Clone> Shared<T> {
     /// A copy of the current status.
     #[must_use]
-    pub fn snapshot(&self) -> WifiStatus {
+    pub fn snapshot(&self) -> T {
         // A poisoned lock only means another thread panicked; the data is still a valid status.
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
     }
+}
 
+impl<T> Shared<T> {
     /// Changes the status in place. Keep `change` short: the lock is held while it runs.
-    pub fn update(&self, change: impl FnOnce(&mut WifiStatus)) {
+    pub fn update(&self, change: impl FnOnce(&mut T)) {
         change(&mut self.0.lock().unwrap_or_else(PoisonError::into_inner));
     }
 }
+
+/// The Wi-Fi status, shared between threads.
+pub type SharedStatus = Shared<WifiStatus>;
+
+/// The Bluetooth status, shared between threads.
+pub type SharedBluetooth = Shared<BtStatus>;

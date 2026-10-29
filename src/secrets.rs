@@ -33,8 +33,9 @@ const KEYS_PARTITION: &str = "nvs_keys";
 /// NVS namespace of all secrets.
 const NAMESPACE: &str = "pulsar";
 
-/// Longest secret in bytes.
-pub const MAX_SECRET_LEN: usize = 256;
+/// Longest secret in bytes. A Wi-Fi record is under 100 bytes; the Bluetooth bond list is the
+/// biggest user, at a few hundred bytes per paired phone.
+pub const MAX_SECRET_LEN: usize = 2048;
 
 /// What can go wrong with the secret store.
 #[derive(Debug, thiserror::Error)]
