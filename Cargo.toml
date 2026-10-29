@@ -34,6 +34,12 @@ zeroize           = "1.9.1"
 [build-dependencies]
 embuild = "0.33.7"
 
+# ESP-IDF 6 no longer ships MQTT in its core tree: it is the managed component `espressif/mqtt`
+# (MQTT 3.1.1 and 5.0). Without it `esp_idf_svc::mqtt` is not compiled. The component manager
+# writes `components_esp32c5.lock` next to this file; commit it.
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/mqtt", version = "1.1" }
+
 [patch.crates-io]
 # esp32-nimble 0.13.0 plus two fixes (a remotely triggerable `todo!()` panic and a data race on
 # the subscriber list), see vendor/esp32-nimble/PATCHES.md.
