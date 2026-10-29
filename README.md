@@ -8,6 +8,7 @@ What it does:
 - Shows the SSID, a 5 GHz / 2.4 GHz badge and a 5-level signal icon on the first line of the 0.96" OLED, the local time (Asia/Taipei, from SNTP) on the second, and the Taipei weather forecast scrolling under them. The forecast comes over HTTPS from Open-Meteo every 15 minutes, so a report on the screen shows that Wi-Fi, DNS, TLS 1.3, the certificate chain and the clock all work. Without internet the last report stays, marked `(old)` after 35 minutes, and updates are retried with a growing delay until the connection is back.
 - Has a general HTTP/HTTPS client (`src/http.rs`): HTTP/1.1 with TLS 1.3 (TLS 1.2 as a fallback), the Mozilla root certificates and certificate date checks. HTTP/2 and HTTP/3 are not available in ESP-IDF.
 - Speaks **Bluetooth LE 5** (NimBLE): a phone pairs with a six-digit passkey shown on the OLED (LE Secure Connections only), and a paired phone can read and subscribe to the Wi-Fi status and the weather text. The board also advertises on the LE Coded PHY for long range, listens with extended scanning, and keeps the bonds in the encrypted secret store. A Bluetooth icon at the right of the second status line shows the state: filled = a phone is connected, hollow = none, steady = paired, blinking = not paired yet. The chip's features and which ones are on are listed in [docs/bluetooth.md](docs/bluetooth.md).
+- Speaks **MQTT 5 and 3.1.1** over TCP, TLS, WebSocket and secure WebSocket (`src/mqtt/`), with a username and password kept in the secret store. It publishes its availability (with a Last Will), a JSON state every minute and takes a few commands (`ping`, `notice` for the screen, `restart`). It announces itself to **Home Assistant** by MQTT discovery. Set `PULSAR_MQTT_URL` to turn it on; see [docs/mqtt.md](docs/mqtt.md).
 - Blinks the user LED.
 - Keeps the Wi-Fi password in an encrypted NVS partition. See [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md).
 
@@ -37,6 +38,19 @@ On the first run the credentials are stored on the chip. Later builds can leave 
 The secret store refuses to open unless flash encryption is on. The `insecure-dev-store` feature lets it open without it, for testing on your desk only. It logs a warning at every boot. Follow [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md) to turn flash encryption on and drop the feature.
 
 For a release build, add `--release`.
+
+## MQTT and Home Assistant
+
+MQTT is off until you give it a broker. Set the URL (and, if the broker wants one, a login) in the environment of the build, just like the Wi-Fi settings:
+
+```sh
+export PULSAR_MQTT_URL='mqtts://broker.example.org:8883'   # also mqtt://, ws://, wss://
+export PULSAR_MQTT_USERNAME='pulsar'
+read -rs PULSAR_MQTT_PASSWORD && export PULSAR_MQTT_PASSWORD
+cargo run --features insecure-dev-store
+```
+
+They are stored on the chip like the Wi-Fi credentials, so later builds can leave them unset. The board then publishes under `pulsar/<id>/` (`<id>` is the end of its MAC address; the log shows it) and appears in Home Assistant as a device. Topics, commands, what is and is not supported, and security advice are in [docs/mqtt.md](docs/mqtt.md).
 
 ## Pairing a phone
 
@@ -84,7 +98,10 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/clock.rs` | SNTP and the local time of day. |
 | `src/http.rs` | The HTTP/HTTPS client. |
 | `src/weather.rs` | Fetches the forecast and turns it into the scrolling text. |
-| `src/message.rs` | The scrolling text shared between the weather thread and the screen. |
+| `src/message.rs` | The scrolling text shared between the weather thread and the screen, with timed notices. |
+| `src/mqtt/` | The MQTT client (`mod.rs`, `client.rs`), the broker settings in the secret store, topic matching and the hand-over from the MQTT task. |
+| `src/telemetry.rs` | What the board does over MQTT: availability, state, commands. |
+| `src/home_assistant.rs` | The Home Assistant discovery message. |
 | `src/ui/` | The screen: status bar (Wi-Fi, clock, Bluetooth icon) and scrolling text. |
 | `src/led.rs` | The blinking LED. |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
