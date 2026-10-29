@@ -213,8 +213,9 @@ pub const MQTT_OUTBOX_LIMIT_BYTES: usize = 16 * 1024;
 /// cannot be told.
 pub const MQTT_MAX_INCOMING_BYTES: usize = 6 * 1024;
 
-/// How many bytes of incoming messages may wait for the dispatcher thread. Beyond that, messages
-/// are dropped (and logged), so a slow handler cannot fill the memory.
+/// How many bytes of incoming messages may wait for the dispatcher thread, counting the payload,
+/// the topic and the bookkeeping of each. Beyond that, messages are dropped (and logged), so a slow
+/// handler cannot fill the memory, whatever the messages look like.
 pub const MQTT_QUEUE_BYTES: usize = 12 * 1024;
 
 /// Stack size of the ESP-IDF MQTT task for `mqtt://` and `ws://`, in bytes. This is ESP-IDF's own
@@ -257,6 +258,12 @@ pub const NOTICE_MAX_LEN: usize = 100;
 /// How long the restart command waits after it announced that the board goes offline, so that the
 /// message can leave before the chip resets.
 pub const RESTART_DELAY: Duration = Duration::from_secs(2);
+
+/// A restart command that arrives within this time after the connection came up is ignored. A
+/// command that was published retained is sent again by the broker after every subscribe, so this
+/// is what keeps such a message from restarting the board over and over, whether or not the board
+/// is allowed to clear it. A real command inside the window has to be sent again.
+pub const RESTART_GRACE: Duration = Duration::from_secs(10);
 
 /// The topic prefix Home Assistant listens to for discovery messages (its default).
 pub const HA_DISCOVERY_PREFIX: &str = "homeassistant";

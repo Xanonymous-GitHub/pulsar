@@ -11,7 +11,7 @@ use esp_idf_svc::mqtt::client::{
 use esp_idf_svc::sys;
 
 use super::reassemble::{Incoming, Reassembler, Step};
-use super::session::{self, Event, Inbound, Wake};
+use super::session::{self, Event, Inbound, Wake, Waker};
 use super::settings::Settings;
 use super::{Error, Message, Options, QoS, topic};
 use crate::clock;
@@ -58,6 +58,8 @@ struct Shared {
     /// Lock order: `state`, then `esp`.
     esp: Mutex<EspMqttClient<'static>>,
     state: Mutex<State>,
+    /// Wakes the dispatcher when its schedule changes.
+    waker: Waker,
     /// `host:port`, for the log.
     host: String,
 }
@@ -98,6 +100,7 @@ impl Client {
         }
 
         let (outbound, inbound) = session::channel();
+        let waker = outbound.waker();
         let esp = EspMqttClient::new_cb(
             settings.url(),
             &configuration(settings, options),
@@ -106,6 +109,7 @@ impl Client {
         let shared = Arc::new(Shared {
             esp: Mutex::new(esp),
             state: Mutex::new(State::default()),
+            waker,
             host: settings.host().to_owned(),
         });
 
@@ -243,6 +247,8 @@ impl Client {
             due: Instant::now() + period,
             task: Arc::new(task),
         });
+        // The dispatcher may be waiting with no deadline at all.
+        self.0.waker.reschedule();
     }
 
     /// How long until the next periodic task is due, if there is one.
@@ -348,7 +354,8 @@ fn dispatch(client: &Weak<Shared>, inbound: &Inbound) {
         let client = Client(shared);
         match wake {
             Wake::Closed => return,
-            Wake::Idle => {}
+            // Nothing to do but go round again: the wait is worked out afresh at the top.
+            Wake::Idle | Wake::Event(Event::Reschedule) => {}
             Wake::Event(Event::Connected { session_present }) => {
                 reassembler.reset();
                 client.on_connected(session_present);

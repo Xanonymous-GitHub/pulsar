@@ -56,7 +56,7 @@ cargo run --features insecure-dev-store
 | `pulsar/<id>/state` | board → broker | Retained JSON, sent on connect and every minute (see below). |
 | `pulsar/<id>/cmd/ping` | broker → board | Any text. The board publishes it on `pulsar/<id>/pong`. |
 | `pulsar/<id>/cmd/notice` | broker → board | Text for the screen, shown for 30 s instead of the weather. ASCII only (other characters become `?`), at most 100 characters. |
-| `pulsar/<id>/cmd/restart` | broker → board | Any message restarts the board. |
+| `pulsar/<id>/cmd/restart` | broker → board | Any message restarts the board, except in the first 10 s after the connection came up (see Security notes). |
 | `homeassistant/device/pulsar-<id>/config` | board → broker | Retained Home Assistant discovery message. |
 
 The state message:
@@ -103,5 +103,5 @@ RAM is the tight resource on this board: with Wi-Fi, Bluetooth and the display r
 - **Use TLS** (`mqtts://` or `wss://`) for anything beyond a test: with `mqtt://` the password and every command cross the network in clear text.
 - **Commands have no password of their own.** Anyone who may publish to `pulsar/<id>/cmd/#` can restart the board or write on its screen. Give the board's login read access to its command topics only, and give only people you trust write access to them.
 - The board's login should be allowed to publish only under `pulsar/<id>/` and `homeassistant/device/pulsar-<id>/`, and to subscribe only to `pulsar/<id>/cmd/+`.
-- A command published *retained* would run at every boot. The board clears a retained `restart` before it restarts, and ignores empty messages, so a mistake does not lock it in a restart loop.
+- A command published *retained* is replayed by the broker after every subscribe. The board ignores a `restart` that comes within 10 s of the connection coming up (`RESTART_GRACE`), whatever the access rules say, and also tries to clear it on the broker, so a mistake cannot lock it in a restart loop. A real `restart` inside that window has to be sent again. Empty messages are never commands.
 - Payloads and credentials are never logged. The ESP-IDF client keeps the password in RAM while it runs, and a build made with the environment variables contains it in the firmware image (as with the Wi-Fi password).

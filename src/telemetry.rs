@@ -19,7 +19,7 @@
 //! | `pulsar/<id>/state` | board → broker | retained JSON, see [`Report`], on connect and every minute |
 //! | `pulsar/<id>/cmd/ping` | broker → board | any text; the board answers on `pulsar/<id>/pong` with the same text |
 //! | `pulsar/<id>/cmd/notice` | broker → board | text to show on the screen for [`NOTICE_DURATION`] (ASCII, at most [`NOTICE_MAX_LEN`] characters) |
-//! | `pulsar/<id>/cmd/restart` | broker → board | any message restarts the board |
+//! | `pulsar/<id>/cmd/restart` | broker → board | any message restarts the board, except in the first [`RESTART_GRACE`] after the connection came up |
 //! | `homeassistant/device/pulsar-<id>/config` | board → broker | retained discovery message |
 //!
 //! # Things to know
@@ -29,22 +29,25 @@
 //!   their own.
 //! - **The session is clean on purpose.** With a kept session the broker would queue commands for
 //!   an offline board and run them at the next boot, so an old `restart` would restart it again.
-//!   For the same reason a `restart` that was published retained is cleared on the broker before
-//!   the board restarts, and empty messages are never commands.
+//! - **A retained `restart` cannot make the board restart for ever.** The broker replays a
+//!   retained message after every subscribe, so a `restart` is ignored in the first
+//!   [`RESTART_GRACE`] after the connection comes up (and the board tries to clear it on the
+//!   broker, which an access rule may forbid). A real command inside that window has to be sent
+//!   again. Empty messages are never commands.
 //! - **The screen text is shared with Bluetooth:** a notice also shows up in the `weather`
 //!   characteristic while it lasts.
 
 use std::io;
 use std::net::Ipv4Addr;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use crate::config::{
-    HOSTNAME, MQTT_TOPIC_PREFIX, NOTICE_DURATION, NOTICE_MAX_LEN, RESTART_DELAY, TELEMETRY_PERIOD,
-    TELEMETRY_RETRY, TELEMETRY_RETRY_MAX, TELEMETRY_STACK_BYTES,
+    HOSTNAME, MQTT_TOPIC_PREFIX, NOTICE_DURATION, NOTICE_MAX_LEN, RESTART_DELAY, RESTART_GRACE,
+    TELEMETRY_PERIOD, TELEMETRY_RETRY, TELEMETRY_RETRY_MAX, TELEMETRY_STACK_BYTES,
 };
 use crate::home_assistant::{self, Device};
 use crate::message::SharedMessage;
@@ -117,12 +120,18 @@ struct Context {
     discovery: Vec<u8>,
     wifi: SharedStatus,
     message: SharedMessage,
+    /// When the connection last came up, which is when the broker replays retained messages.
+    online_since: Mutex<Option<Instant>>,
 }
 
 impl Context {
     /// Runs on every (re)connection: says the board is online, describes it to Home Assistant and
     /// sends the first state.
     fn announce(&self, client: &Client) {
+        *self
+            .online_since
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
         publish(
             client,
             &self.topics.availability,
@@ -204,10 +213,28 @@ impl Context {
         self.message.show_notice(text, NOTICE_DURATION);
     }
 
+    /// Whether the connection came up so recently that a command may be a retained message that
+    /// the broker replays after the subscribe, see [`RESTART_GRACE`].
+    fn just_connected(&self) -> bool {
+        self.online_since
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_none_or(|since| since.elapsed() < RESTART_GRACE)
+    }
+
     fn restart(&self, client: &Client, message: &Message<'_>) {
-        log::warn!("restart requested over MQTT");
-        // A command published retained would run again after every boot: clear it on the broker.
+        // Clear the command on the broker if the broker lets us. This is only a courtesy: the
+        // publish may be refused (an access rule) or lost (a dropped connection), so the
+        // protection against a restart loop is the grace period below.
         publish(client, message.topic, b"", QoS::AtLeastOnce, true);
+        if self.just_connected() {
+            log::warn!(
+                "MQTT: ignored a restart command that came right after connecting \
+                 (it is probably a retained message)"
+            );
+            return;
+        }
+        log::warn!("restart requested over MQTT");
         // Say so on purpose, instead of leaving it to the Last Will.
         publish(
             client,
@@ -300,6 +327,7 @@ fn run(settings: &Settings, wifi: SharedStatus, message: SharedMessage) {
         topics,
         wifi,
         message,
+        online_since: Mutex::new(None),
     });
 
     while !context.wifi.snapshot().is_online() {

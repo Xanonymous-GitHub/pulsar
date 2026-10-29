@@ -62,6 +62,7 @@
 //!   environment variables contains it in the firmware image, like the Wi-Fi password.
 //! - Payloads and credentials are never logged; topics only in warnings.
 
+mod budget;
 mod client;
 mod reassemble;
 mod session;
