@@ -38,7 +38,7 @@ use crate::config::{
 };
 use crate::http::{self, Client};
 use crate::message::SharedMessage;
-use crate::status::{LinkState, SharedStatus};
+use crate::status::SharedStatus;
 
 /// How often the thread looks at the network, the clock and what the screen should say.
 const TICK: Duration = Duration::from_secs(1);
@@ -191,7 +191,7 @@ fn run(status: &SharedStatus, message: &SharedMessage) {
 
     loop {
         // An update that came due while the network was down runs as soon as it is back.
-        if Instant::now() >= next_attempt && network_up(status) {
+        if Instant::now() >= next_attempt && status.snapshot().is_online() {
             match fetch(&client) {
                 Ok(report) => {
                     log::info!("weather: {report}");
@@ -220,9 +220,4 @@ fn run(status: &SharedStatus, message: &SharedMessage) {
         }
         thread::sleep(TICK);
     }
-}
-
-fn network_up(status: &SharedStatus) -> bool {
-    let status = status.snapshot();
-    status.state == LinkState::Connected && status.ip.is_some()
 }
