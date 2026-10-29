@@ -22,7 +22,7 @@
 //!
 //! # What is supported
 //!
-//! - **MQTT 5.0 and 3.1.1.** `config::MQTT_PROTOCOL_V5` picks one. With 5.0 the client asks the
+//! - **MQTT 5.0 and 3.1.1.** `config::MQTT_VERSION` picks one. With 5.0 the client asks the
 //!   broker to keep the session for a while, to hold back the Last Will so that a quick reconnect
 //!   cancels it, and to send nothing longer than the incoming limit. Shared subscriptions
 //!   (`$share/<group>/<filter>`) are accepted by the filter check.

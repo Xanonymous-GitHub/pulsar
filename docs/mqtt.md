@@ -28,8 +28,8 @@ cargo run --features insecure-dev-store
 
 | Feature | State |
 |---|---|
-| MQTT 5.0 | Yes. `config::MQTT_PROTOCOL_V5` (default on). Session expiry, will delay, receive maximum and maximum packet size are sent in CONNECT. |
-| MQTT 3.1.1 | Yes. Set `MQTT_PROTOCOL_V5` to `false` for a broker without version 5. |
+| MQTT 5.0 | Yes. `config::MQTT_VERSION` is `MqttVersion::V5` (the default). Session expiry, will delay, receive maximum and maximum packet size are sent in CONNECT. |
+| MQTT 3.1.1 | Yes. Set `config::MQTT_VERSION` to `MqttVersion::V3_1_1` for a broker without version 5. |
 | `mqtt://` (TCP) | Yes. |
 | `mqtts://` (TLS 1.3, 1.2 fallback) | Yes. The server certificate, host name and dates are checked against the built-in Mozilla roots. The board waits for the SNTP clock first. |
 | `ws://`, `wss://` (WebSocket) | Yes. Put the broker's path in the URL, for example `wss://broker.example.org/mqtt`. |

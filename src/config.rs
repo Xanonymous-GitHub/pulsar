@@ -166,9 +166,19 @@ pub const BLE_BOOT_SCAN: Duration = Duration::from_secs(3);
 /// Name of the secret that holds the MQTT broker URL and login.
 pub const MQTT_SECRET_KEY: &str = "mqtt";
 
-/// Whether to speak MQTT 5.0. `false` speaks 3.1.1, for brokers that do not know version 5. The
-/// MQTT 5 settings below (session expiry, will delay, receive maximum) are ignored then.
-pub const MQTT_PROTOCOL_V5: bool = true;
+/// A version of the MQTT protocol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MqttVersion {
+    /// MQTT 3.1.1: for brokers that do not know version 5. The MQTT 5 settings below (session
+    /// expiry, will delay, receive maximum, maximum packet size) are not sent then.
+    V3_1_1,
+    /// MQTT 5.0.
+    V5,
+}
+
+/// The MQTT version the client speaks. Change it to [`MqttVersion::V3_1_1`] for a broker that does
+/// not know version 5.
+pub const MQTT_VERSION: MqttVersion = MqttVersion::V5;
 
 /// How often the client pings the broker while it is idle. The broker drops the connection after
 /// one and a half times this. It is also how fast a dead link is noticed.

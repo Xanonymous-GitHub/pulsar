@@ -66,7 +66,7 @@ CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=7000
 CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y
 
 # MQTT (src/mqtt/). The client is the managed component `espressif/mqtt`, see Cargo.toml.
-# MQTT 5.0 on top of 3.1.1 (`config::MQTT_PROTOCOL_V5` picks the one used).
+# MQTT 5.0 on top of 3.1.1 (`config::MQTT_VERSION` picks the one used).
 CONFIG_MQTT_PROTOCOL_5=y
 # Transports: mqtt:// (TCP), mqtts:// (TLS), ws:// and wss:// (WebSocket, plain and over TLS).
 # Server certificates are checked against the built-in Mozilla bundle, as for HTTPS.

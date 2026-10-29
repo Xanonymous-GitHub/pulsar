@@ -17,9 +17,9 @@ use super::{Error, Message, Options, QoS, topic};
 use crate::clock;
 use crate::config::{
     HTTP_CLOCK_WAIT, MQTT_KEEP_ALIVE, MQTT_MAX_INCOMING_BYTES, MQTT_NETWORK_TIMEOUT,
-    MQTT_OUTBOX_LIMIT_BYTES, MQTT_PROTOCOL_V5, MQTT_RECEIVE_MAXIMUM, MQTT_RECONNECT,
-    MQTT_RX_BUFFER_BYTES, MQTT_SESSION_EXPIRY, MQTT_STACK_BYTES, MQTT_TASK_STACK_BYTES,
-    MQTT_TLS_TASK_STACK_BYTES, MQTT_TX_BUFFER_BYTES, MQTT_WILL_DELAY,
+    MQTT_OUTBOX_LIMIT_BYTES, MQTT_RECEIVE_MAXIMUM, MQTT_RECONNECT, MQTT_RX_BUFFER_BYTES,
+    MQTT_SESSION_EXPIRY, MQTT_STACK_BYTES, MQTT_TASK_STACK_BYTES, MQTT_TLS_TASK_STACK_BYTES,
+    MQTT_TX_BUFFER_BYTES, MQTT_VERSION, MQTT_WILL_DELAY, MqttVersion,
 };
 
 /// Room for the packet header and the topic on top of the payload, for the MQTT 5 maximum packet
@@ -384,23 +384,26 @@ fn dispatch(client: &Weak<Shared>, inbound: &Inbound) {
 
 /// The settings for the ESP-IDF client.
 fn configuration<'a>(settings: &'a Settings, options: &'a Options) -> MqttClientConfiguration<'a> {
-    // MQTT 5 only: the connect properties. They ask the broker to keep the session a while, to
-    // hold back the Last Will so that a quick reconnect cancels it, and to stay within our limits.
-    let mqtt5 = MQTT_PROTOCOL_V5.then(|| Mqtt5ConnectionPropertyConfig {
-        session_expiry_interval: Some(seconds(MQTT_SESSION_EXPIRY)),
-        will_delay_interval: Some(seconds(MQTT_WILL_DELAY)),
-        receive_maximum: Some(MQTT_RECEIVE_MAXIMUM),
-        maximum_packet_size: u32::try_from(MQTT_MAX_INCOMING_BYTES + PACKET_OVERHEAD_BYTES).ok(),
-        ..Mqtt5ConnectionPropertyConfig::default()
-    });
+    // For MQTT 5 the connect properties ask the broker to keep the session a while, to hold back
+    // the Last Will so that a quick reconnect cancels it, and to stay within our limits.
+    let (protocol_version, mqtt5_connection_property) = match MQTT_VERSION {
+        MqttVersion::V3_1_1 => (MqttProtocolVersion::V3_1_1, None),
+        MqttVersion::V5 => (
+            MqttProtocolVersion::V5,
+            Some(Mqtt5ConnectionPropertyConfig {
+                session_expiry_interval: Some(seconds(MQTT_SESSION_EXPIRY)),
+                will_delay_interval: Some(seconds(MQTT_WILL_DELAY)),
+                receive_maximum: Some(MQTT_RECEIVE_MAXIMUM),
+                maximum_packet_size: u32::try_from(MQTT_MAX_INCOMING_BYTES + PACKET_OVERHEAD_BYTES)
+                    .ok(),
+                ..Mqtt5ConnectionPropertyConfig::default()
+            }),
+        ),
+    };
 
     MqttClientConfiguration {
-        protocol_version: Some(if MQTT_PROTOCOL_V5 {
-            MqttProtocolVersion::V5
-        } else {
-            MqttProtocolVersion::V3_1_1
-        }),
-        mqtt5_connection_property: mqtt5,
+        protocol_version: Some(protocol_version),
+        mqtt5_connection_property,
         client_id: options.client_id.as_deref(),
         keep_alive_interval: Some(MQTT_KEEP_ALIVE),
         reconnect_timeout: Some(MQTT_RECONNECT),
