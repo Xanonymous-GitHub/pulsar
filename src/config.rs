@@ -162,3 +162,123 @@ pub const BLE_SCAN_WINDOW_MS: u16 = 50;
 /// A scan once advertising has started, to show in the log that the Observer works.
 /// `Duration::ZERO` turns it off.
 pub const BLE_BOOT_SCAN: Duration = Duration::from_secs(3);
+
+/// Name of the secret that holds the MQTT broker URL and login.
+pub const MQTT_SECRET_KEY: &str = "mqtt";
+
+/// A version of the MQTT protocol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MqttVersion {
+    /// MQTT 3.1.1: for brokers that do not know version 5. The MQTT 5 settings below (session
+    /// expiry, will delay, receive maximum, maximum packet size) are not sent then.
+    V3_1_1,
+    /// MQTT 5.0.
+    V5,
+}
+
+/// The MQTT version the client speaks. Change it to [`MqttVersion::V3_1_1`] for a broker that does
+/// not know version 5.
+pub const MQTT_VERSION: MqttVersion = MqttVersion::V5;
+
+/// How often the client pings the broker while it is idle. The broker drops the connection after
+/// one and a half times this. It is also how fast a dead link is noticed.
+pub const MQTT_KEEP_ALIVE: Duration = Duration::from_secs(30);
+
+/// Wait between two reconnection attempts after the connection is lost (the MQTT task does the
+/// reconnecting by itself).
+pub const MQTT_RECONNECT: Duration = Duration::from_secs(10);
+
+/// How long the broker connection (connect, TLS handshake, send, receive) may wait for network
+/// data before it fails.
+pub const MQTT_NETWORK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// MQTT 5, only for a kept session (`mqtt::Options::persistent_session`): how long the broker keeps
+/// the session after a disconnect. It must be at least [`MQTT_WILL_DELAY`], or the Last Will goes
+/// out at once. Without a kept session the client asks for none: the session ends at the
+/// disconnect.
+pub const MQTT_SESSION_EXPIRY: Duration = Duration::from_mins(5);
+
+/// MQTT 5, only for a kept session (`mqtt::Options::persistent_session`): how long the broker waits
+/// after a lost connection before it publishes the Last Will. A quick reconnect (a Wi-Fi hiccup)
+/// resumes the session and cancels it, so the availability does not flap. A clean start ends the
+/// old session, which sends the Last Will at once, so the delay would do nothing there.
+pub const MQTT_WILL_DELAY: Duration = Duration::from_secs(15);
+
+/// MQTT 5: how many messages with `QoS` 1 or 2 the broker may send without waiting for our
+/// acknowledgement.
+pub const MQTT_RECEIVE_MAXIMUM: u16 = 8;
+
+/// Receive buffer of the MQTT client, in bytes. A longer message arrives in several pieces, which
+/// the client puts back together.
+pub const MQTT_RX_BUFFER_BYTES: usize = 2 * 1024;
+
+/// Send buffer of the MQTT client, in bytes. It must hold the packet header and the topic; a
+/// longer payload (the Home Assistant discovery message) is sent in pieces.
+pub const MQTT_TX_BUFFER_BYTES: usize = 1024;
+
+/// How many bytes of messages may wait to be sent (while offline, or for an acknowledgement). A
+/// publish beyond that fails with `mqtt::Error::OutboxFull`.
+pub const MQTT_OUTBOX_LIMIT_BYTES: usize = 16 * 1024;
+
+/// The longest incoming message the client accepts, in bytes. Longer ones are dropped with a
+/// warning. For MQTT 5 the broker is told, so it does not even send them. Keep it well below the
+/// largest TLS record (`CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN`, 8 KiB in `sdkconfig.defaults`): a
+/// message that does not fit in one record breaks the TLS connection, and with MQTT 3.1.1 the broker
+/// cannot be told.
+pub const MQTT_MAX_INCOMING_BYTES: usize = 6 * 1024;
+
+/// How many bytes of incoming messages may wait for the dispatcher thread, counting the payload,
+/// the topic and the bookkeeping of each. Beyond that, messages are dropped (and logged), so a slow
+/// handler cannot fill the memory, whatever the messages look like.
+pub const MQTT_QUEUE_BYTES: usize = 12 * 1024;
+
+/// Stack size of the ESP-IDF MQTT task for `mqtt://` and `ws://`, in bytes. This is ESP-IDF's own
+/// default.
+pub const MQTT_TASK_STACK_BYTES: usize = 6 * 1024;
+
+/// Stack size of the ESP-IDF MQTT task for `mqtts://` and `wss://`, in bytes. The TLS handshake
+/// runs on it.
+pub const MQTT_TLS_TASK_STACK_BYTES: usize = 10 * 1024;
+
+/// Stack size of the thread that runs the subscription handlers, connect hooks and periodic
+/// tasks, in bytes. Every thread costs its whole stack in heap, which is scarce: about 80 KB are
+/// free with Wi-Fi, Bluetooth and the display running, and one TLS session needs about 40 KB.
+pub const MQTT_STACK_BYTES: usize = 5 * 1024;
+
+/// The first part of every topic the board publishes and subscribes to: `pulsar/<device>/...`.
+pub const MQTT_TOPIC_PREFIX: &str = "pulsar";
+
+/// Time between two state messages.
+pub const TELEMETRY_PERIOD: Duration = Duration::from_mins(1);
+
+/// Wait before trying to connect to the broker again after a failed start. It doubles after every
+/// further failure up to [`TELEMETRY_RETRY_MAX`].
+pub const TELEMETRY_RETRY: Duration = Duration::from_secs(5);
+
+/// Longest wait between two attempts to start the MQTT client.
+pub const TELEMETRY_RETRY_MAX: Duration = Duration::from_mins(2);
+
+/// Stack size of the telemetry set-up thread, in bytes. It builds the Home Assistant discovery
+/// message (JSON), connects, and then ends, which gives the stack back.
+pub const TELEMETRY_STACK_BYTES: usize = 8 * 1024;
+
+/// How long a text sent with the `notice` command stays on the screen.
+pub const NOTICE_DURATION: Duration = Duration::from_secs(30);
+
+/// The longest notice in characters; more is cut off. Only ASCII is shown (the display font has
+/// no other characters).
+pub const NOTICE_MAX_LEN: usize = 100;
+
+/// How long the restart command waits after it announced that the board goes offline, so that the
+/// message can leave before the chip resets.
+pub const RESTART_DELAY: Duration = Duration::from_secs(2);
+
+/// How long a restart command waits for the broker to confirm that it cleared the command (by
+/// passing the board's empty retained message on to its subscribers). A command that was published
+/// retained is sent again by the broker after every subscribe, so the board restarts only once it
+/// is gone. If the confirmation does not come in this time (the clear was refused or lost), the
+/// board stays up.
+pub const RESTART_CONFIRM_WAIT: Duration = Duration::from_secs(10);
+
+/// The topic prefix Home Assistant listens to for discovery messages (its default).
+pub const HA_DISCOVERY_PREFIX: &str = "homeassistant";

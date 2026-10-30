@@ -11,6 +11,7 @@
 use core::ffi::{c_int, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use esp_idf_svc::sys;
 use zeroize::{Zeroize, Zeroizing};
@@ -94,6 +95,56 @@ pub fn enable_dual_band_wifi6() -> Result<(), sys::EspError> {
 pub fn random_u32() -> u32 {
     // SAFETY: the function takes no arguments, has no preconditions and only reads hardware.
     unsafe { sys::esp_random() }
+}
+
+/// The factory-programmed base MAC address of the chip (unique per board).
+///
+/// # Errors
+///
+/// Fails if the eFuse block that holds the address cannot be read.
+pub fn base_mac() -> Result<[u8; 6], sys::EspError> {
+    let mut mac = [0_u8; 6];
+    // SAFETY: the function writes exactly 6 bytes to the pointer, which points to a 6-byte array
+    // that is valid for writes for the duration of the call.
+    sys::esp!(unsafe { sys::esp_efuse_mac_get_default(mac.as_mut_ptr()) })?;
+    Ok(mac)
+}
+
+/// The free heap right now, in bytes.
+#[must_use]
+pub fn free_heap() -> u32 {
+    // SAFETY: the function takes no arguments, has no preconditions and only reads heap counters.
+    unsafe { sys::esp_get_free_heap_size() }
+}
+
+/// The smallest free heap since boot, in bytes: how close the firmware came to running out.
+#[must_use]
+pub fn min_free_heap() -> u32 {
+    // SAFETY: the function takes no arguments, has no preconditions and only reads heap counters.
+    unsafe { sys::esp_get_minimum_free_heap_size() }
+}
+
+/// The size of the largest block that can be allocated now, in bytes. TLS needs a few large
+/// contiguous buffers, so this tells more than [`free_heap`] when the heap is fragmented.
+#[must_use]
+pub fn largest_free_block() -> usize {
+    // SAFETY: the function only reads heap bookkeeping and has no preconditions.
+    unsafe { sys::heap_caps_get_largest_free_block(sys::MALLOC_CAP_8BIT) }
+}
+
+/// The time since boot, from the high-resolution timer (not affected by the SNTP clock).
+#[must_use]
+pub fn uptime() -> Duration {
+    // SAFETY: the function takes no arguments, has no preconditions and only reads the timer.
+    let micros = unsafe { sys::esp_timer_get_time() };
+    Duration::from_micros(u64::try_from(micros).unwrap_or_default())
+}
+
+/// Restarts the chip. Never returns.
+pub fn restart() -> ! {
+    // SAFETY: the function takes no arguments and has no preconditions. It runs the shutdown
+    // handlers and resets the chip.
+    unsafe { sys::esp_restart() }
 }
 
 /// Turns a NimBLE return code (0 is success) into a `Result`. The code itself is only logged,

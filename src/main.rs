@@ -7,8 +7,10 @@ use pulsar::{
     board::Board,
     clock, config, led,
     message::SharedMessage,
+    mqtt,
     secrets::SecretStore,
     status::{BtState, LinkState, SharedBluetooth, SharedStatus},
+    telemetry,
     ui::Screen,
     weather, wifi,
 };
@@ -26,6 +28,22 @@ fn open_secrets() -> Option<SecretStore> {
         }
         Err(error) => {
             log::error!("secrets unavailable: {error}");
+            None
+        }
+    }
+}
+
+/// Loads the MQTT broker settings. MQTT is optional: no settings, or settings that cannot be read,
+/// leave the rest of the firmware running.
+fn load_mqtt_settings(secrets: Option<&SecretStore>) -> Option<mqtt::Settings> {
+    match mqtt::Settings::load_or_provision(secrets?) {
+        Ok(None) => {
+            log::info!("MQTT is not configured (set PULSAR_MQTT_URL at build time)");
+            None
+        }
+        Ok(settings) => settings,
+        Err(error) => {
+            log::error!("MQTT settings unavailable: {error}");
             None
         }
     }
@@ -54,6 +72,7 @@ fn main() -> Result<()> {
     // Wi-Fi needs its credentials from the store. If they are missing, the rest of the firmware
     // keeps running and the screen says why.
     let secrets = open_secrets();
+    let mqtt_settings = load_mqtt_settings(secrets.as_ref());
     let started = secrets
         .as_ref()
         .ok_or(wifi::Error::NoCredentials)
@@ -68,6 +87,12 @@ fn main() -> Result<()> {
             }
             if let Err(error) = weather::spawn(status.clone(), message.clone()) {
                 log::error!("weather not started: {error}");
+            }
+            // The telemetry thread waits for an address, then connects to the MQTT broker.
+            if let Some(settings) = mqtt_settings
+                && let Err(error) = telemetry::spawn(settings, status.clone(), message.clone())
+            {
+                log::error!("MQTT not started: {error}");
             }
         }
         Err(error) => {

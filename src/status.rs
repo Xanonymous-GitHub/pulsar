@@ -61,6 +61,14 @@ pub struct WifiStatus {
     pub ip: Option<Ipv4Addr>,
 }
 
+impl WifiStatus {
+    /// Whether the board is associated and has an address, so that network requests can work.
+    #[must_use]
+    pub fn is_online(&self) -> bool {
+        self.state == LinkState::Connected && self.ip.is_some()
+    }
+}
+
 /// Number of levels of the signal icon (0 is no usable signal, so there are one more values).
 pub const SIGNAL_LEVELS: u8 = 5;
 
