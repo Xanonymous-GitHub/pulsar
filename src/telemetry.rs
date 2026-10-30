@@ -19,7 +19,7 @@
 //! | `pulsar/<id>/state` | board → broker | retained JSON, see [`Report`], on connect and every minute |
 //! | `pulsar/<id>/cmd/ping` | broker → board | any text; the board answers on `pulsar/<id>/pong` with the same text |
 //! | `pulsar/<id>/cmd/notice` | broker → board | text to show on the screen for [`NOTICE_DURATION`] (ASCII, at most [`NOTICE_MAX_LEN`] characters) |
-//! | `pulsar/<id>/cmd/restart` | broker → board | any message restarts the board, except in the first [`RESTART_GRACE`] after the connection came up |
+//! | `pulsar/<id>/cmd/restart` | broker → board | any message restarts the board, once the broker has confirmed that the command is cleared |
 //! | `homeassistant/device/pulsar-<id>/config` | board → broker | retained discovery message |
 //!
 //! # Things to know
@@ -29,25 +29,32 @@
 //!   their own.
 //! - **The session is clean on purpose.** With a kept session the broker would queue commands for
 //!   an offline board and run them at the next boot, so an old `restart` would restart it again.
+//!   The price: without a session the broker sends the Last Will as soon as it sees the board
+//!   reconnect, so a Wi-Fi hiccup shows `offline` for a moment before `online` follows.
 //! - **A retained `restart` cannot make the board restart for ever.** The broker replays a
-//!   retained message after every subscribe, so a `restart` is ignored in the first
-//!   [`RESTART_GRACE`] after the connection comes up (and the board tries to clear it on the
-//!   broker, which an access rule may forbid). A real command inside that window has to be sent
-//!   again. Empty messages are never commands.
+//!   retained message after every subscribe, whenever it likes. So the board first clears the
+//!   command (an empty retained message) and restarts only when the broker passes that message on
+//!   to its subscribers, the board's own subscription included: that is the broker saying it
+//!   processed the clear, and the retained command is gone. If the clear is refused (an access
+//!   rule) or lost, nothing is passed on within [`RESTART_CONFIRM_WAIT`] and the board stays up.
+//!   Empty messages are never commands of their own.
 //! - **The screen text is shared with Bluetooth:** a notice also shows up in the `weather`
 //!   characteristic while it lasts.
 
+mod confirmation;
+
 use std::io;
 use std::net::Ipv4Addr;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use self::confirmation::Confirmation;
 use crate::config::{
-    HOSTNAME, MQTT_TOPIC_PREFIX, NOTICE_DURATION, NOTICE_MAX_LEN, RESTART_DELAY, RESTART_GRACE,
-    TELEMETRY_PERIOD, TELEMETRY_RETRY, TELEMETRY_RETRY_MAX, TELEMETRY_STACK_BYTES,
+    HOSTNAME, MQTT_TOPIC_PREFIX, NOTICE_DURATION, NOTICE_MAX_LEN, RESTART_CONFIRM_WAIT,
+    RESTART_DELAY, TELEMETRY_PERIOD, TELEMETRY_RETRY, TELEMETRY_RETRY_MAX, TELEMETRY_STACK_BYTES,
 };
 use crate::home_assistant::{self, Device};
 use crate::message::SharedMessage;
@@ -120,18 +127,14 @@ struct Context {
     discovery: Vec<u8>,
     wifi: SharedStatus,
     message: SharedMessage,
-    /// When the connection last came up, which is when the broker replays retained messages.
-    online_since: Mutex<Option<Instant>>,
+    /// A restart that waits for the broker to confirm that it cleared the command.
+    restart: Mutex<Confirmation>,
 }
 
 impl Context {
     /// Runs on every (re)connection: says the board is online, describes it to Home Assistant and
     /// sends the first state.
     fn announce(&self, client: &Client) {
-        *self
-            .online_since
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
         publish(
             client,
             &self.topics.availability,
@@ -176,16 +179,21 @@ impl Context {
     }
 
     fn handle_command(&self, client: &Client, message: &Message<'_>) {
-        // An empty message is how a retained command is cleared on the broker, not a command.
-        if message.payload.is_empty() {
-            return;
-        }
         let Some(command) = message
             .topic
             .strip_prefix(self.topics.command_prefix.as_str())
         else {
             return;
         };
+        // An empty message is how a retained command is cleared on the broker, so it is never a
+        // command. The broker passes our own clear of `restart` on to us, which `restart_cleared`
+        // takes as the confirmation.
+        if message.payload.is_empty() {
+            if command == "restart" {
+                self.restart_cleared(client);
+            }
+            return;
+        }
         match command {
             "ping" => publish(
                 client,
@@ -213,25 +221,28 @@ impl Context {
         self.message.show_notice(text, NOTICE_DURATION);
     }
 
-    /// Whether the connection came up so recently that a command may be a retained message that
-    /// the broker replays after the subscribe, see [`RESTART_GRACE`].
-    fn just_connected(&self) -> bool {
-        self.online_since
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_none_or(|since| since.elapsed() < RESTART_GRACE)
+    fn restart_gate(&self) -> MutexGuard<'_, Confirmation> {
+        self.restart.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The first step of a restart: clear the command on the broker. A retained command comes
+    /// back after every subscribe, so the board must not restart before it is gone, or it would
+    /// restart for ever. The second step is [`Self::restart_cleared`].
     fn restart(&self, client: &Client, message: &Message<'_>) {
-        // Clear the command on the broker if the broker lets us. This is only a courtesy: the
-        // publish may be refused (an access rule) or lost (a dropped connection), so the
-        // protection against a restart loop is the grace period below.
-        publish(client, message.topic, b"", QoS::AtLeastOnce, true);
-        if self.just_connected() {
-            log::warn!(
-                "MQTT: ignored a restart command that came right after connecting \
-                 (it is probably a retained message)"
-            );
+        if !self.restart_gate().ask(Instant::now()) {
+            log::info!("MQTT: a restart is already waiting for the broker");
+            return;
+        }
+        if let Err(error) = client.publish(message.topic, b"", QoS::AtLeastOnce, true) {
+            self.restart_gate().cancel();
+            log::warn!("MQTT: cannot clear the restart command, so the board stays up: {error}");
+        }
+    }
+
+    /// The second step: the broker passed our empty message on, so it has removed the retained
+    /// command. Only now is it safe to restart.
+    fn restart_cleared(&self, client: &Client) {
+        if !self.restart_gate().confirm(Instant::now()) {
             return;
         }
         log::warn!("restart requested over MQTT");
@@ -245,6 +256,17 @@ impl Context {
         );
         thread::sleep(RESTART_DELAY);
         platform::restart()
+    }
+
+    /// Says so in the log when a restart was never confirmed.
+    fn expire_restart(&self) {
+        if self.restart_gate().expire(Instant::now()) {
+            log::warn!(
+                "MQTT: the broker did not confirm clearing the restart command within {}s, so \
+                 the board did not restart (is it allowed to publish to that topic?)",
+                RESTART_CONFIRM_WAIT.as_secs()
+            );
+        }
     }
 }
 
@@ -327,7 +349,7 @@ fn run(settings: &Settings, wifi: SharedStatus, message: SharedMessage) {
         topics,
         wifi,
         message,
-        online_since: Mutex::new(None),
+        restart: Mutex::new(Confirmation::new(RESTART_CONFIRM_WAIT)),
     });
 
     while !context.wifi.snapshot().is_online() {
@@ -350,6 +372,7 @@ fn run(settings: &Settings, wifi: SharedStatus, message: SharedMessage) {
     // The state goes out from the client's own thread, so this one has nothing left to do.
     let tick_context = Arc::clone(&context);
     client.every(TELEMETRY_PERIOD, move |client| {
+        tick_context.expire_restart();
         if client.is_connected() {
             tick_context.publish_state(client);
         }

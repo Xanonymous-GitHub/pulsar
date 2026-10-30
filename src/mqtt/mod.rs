@@ -22,10 +22,12 @@
 //!
 //! # What is supported
 //!
-//! - **MQTT 5.0 and 3.1.1.** `config::MQTT_VERSION` picks one. With 5.0 the client asks the
-//!   broker to keep the session for a while, to hold back the Last Will so that a quick reconnect
-//!   cancels it, and to send nothing longer than the incoming limit. Shared subscriptions
-//!   (`$share/<group>/<filter>`) are accepted by the filter check.
+//! - **MQTT 5.0 and 3.1.1.** `config::MQTT_VERSION` picks one. With 5.0 the client tells the
+//!   broker to send nothing longer than the incoming limit and, for a kept session
+//!   ([`Options::persistent_session`]), to keep it for a while and to hold back the Last Will, so
+//!   that a quick reconnect resumes the session and cancels the will. Without a kept session the
+//!   will goes out as soon as the broker sees the client again or the connection is found dead.
+//!   Shared subscriptions (`$share/<group>/<filter>`) are accepted by the filter check.
 //! - **Four transports,** chosen by the URL scheme: `mqtt://` (TCP), `mqtts://` (TLS),
 //!   `ws://` and `wss://` (WebSocket, plain or over TLS). A WebSocket URL needs the path the
 //!   broker listens on, for example `wss://broker.example/mqtt`. TLS 1.3 (1.2 as a fallback) checks
@@ -202,7 +204,8 @@ pub struct Options {
     /// The Last Will.
     pub will: Option<Will>,
     /// Ask the broker to keep the session (subscriptions, and messages with `QoS` 1 and 2 that
-    /// arrived meanwhile) while the client is offline. Off by default: after a reboot an old
-    /// command, such as "restart", would run again.
+    /// arrived meanwhile) while the client is offline. With MQTT 5 this also delays the Last Will
+    /// (`config::MQTT_WILL_DELAY`), so a quick reconnect does not publish it. Off by default:
+    /// after a reboot an old command, such as "restart", would run again.
     pub persistent_session: bool,
 }

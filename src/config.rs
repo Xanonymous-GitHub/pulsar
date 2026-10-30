@@ -192,12 +192,16 @@ pub const MQTT_RECONNECT: Duration = Duration::from_secs(10);
 /// data before it fails.
 pub const MQTT_NETWORK_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// MQTT 5: how long the broker keeps the session after a disconnect. It must be at least
-/// [`MQTT_WILL_DELAY`], or the Last Will goes out at once.
+/// MQTT 5, only for a kept session (`mqtt::Options::persistent_session`): how long the broker keeps
+/// the session after a disconnect. It must be at least [`MQTT_WILL_DELAY`], or the Last Will goes
+/// out at once. Without a kept session the client asks for none: the session ends at the
+/// disconnect.
 pub const MQTT_SESSION_EXPIRY: Duration = Duration::from_mins(5);
 
-/// MQTT 5: how long the broker waits after a lost connection before it publishes the Last Will. A
-/// quick reconnect (a Wi-Fi hiccup) cancels it, so the availability does not flap.
+/// MQTT 5, only for a kept session (`mqtt::Options::persistent_session`): how long the broker waits
+/// after a lost connection before it publishes the Last Will. A quick reconnect (a Wi-Fi hiccup)
+/// resumes the session and cancels it, so the availability does not flap. A clean start ends the
+/// old session, which sends the Last Will at once, so the delay would do nothing there.
 pub const MQTT_WILL_DELAY: Duration = Duration::from_secs(15);
 
 /// MQTT 5: how many messages with `QoS` 1 or 2 the broker may send without waiting for our
@@ -269,11 +273,12 @@ pub const NOTICE_MAX_LEN: usize = 100;
 /// message can leave before the chip resets.
 pub const RESTART_DELAY: Duration = Duration::from_secs(2);
 
-/// A restart command that arrives within this time after the connection came up is ignored. A
-/// command that was published retained is sent again by the broker after every subscribe, so this
-/// is what keeps such a message from restarting the board over and over, whether or not the board
-/// is allowed to clear it. A real command inside the window has to be sent again.
-pub const RESTART_GRACE: Duration = Duration::from_secs(10);
+/// How long a restart command waits for the broker to confirm that it cleared the command (by
+/// passing the board's empty retained message on to its subscribers). A command that was published
+/// retained is sent again by the broker after every subscribe, so the board restarts only once it
+/// is gone. If the confirmation does not come in this time (the clear was refused or lost), the
+/// board stays up.
+pub const RESTART_CONFIRM_WAIT: Duration = Duration::from_secs(10);
 
 /// The topic prefix Home Assistant listens to for discovery messages (its default).
 pub const HA_DISCOVERY_PREFIX: &str = "homeassistant";

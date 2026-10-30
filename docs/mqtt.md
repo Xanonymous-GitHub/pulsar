@@ -28,14 +28,14 @@ cargo run --features insecure-dev-store
 
 | Feature | State |
 |---|---|
-| MQTT 5.0 | Yes. `config::MQTT_VERSION` is `MqttVersion::V5` (the default). Session expiry, will delay, receive maximum and maximum packet size are sent in CONNECT. |
+| MQTT 5.0 | Yes. `config::MQTT_VERSION` is `MqttVersion::V5` (the default). Receive maximum and maximum packet size are sent in CONNECT, and with a kept session also the session expiry and the will delay. |
 | MQTT 3.1.1 | Yes. Set `config::MQTT_VERSION` to `MqttVersion::V3_1_1` for a broker without version 5. |
 | `mqtt://` (TCP) | Yes. |
 | `mqtts://` (TLS 1.3, 1.2 fallback) | Yes. The server certificate, host name and dates are checked against the built-in Mozilla roots. The board waits for the SNTP clock first. |
 | `ws://`, `wss://` (WebSocket) | Yes. Put the broker's path in the URL, for example `wss://broker.example.org/mqtt`. |
 | Username and password | Yes. Redacted in `Debug`, wiped on drop, stored encrypted. |
 | QoS 0, 1, 2; retained messages | Yes. |
-| Last Will | Yes, with a delay on MQTT 5 so that a quick reconnect cancels it. |
+| Last Will | Yes. On MQTT 5 with a kept session (`Options::persistent_session`) it is delayed, so a quick reconnect cancels it. The telemetry does not keep the session, so there the broker sends it at once: a Wi-Fi hiccup shows `offline` for a moment before `online` follows. |
 | Wildcards (`+`, `#`), `$SYS` rules | Yes, one handler per subscription. |
 | Shared subscriptions (`$share/g/...`) | The filter is accepted (MQTT 5 brokers). |
 | Reconnect, resubscribe | Yes. The MQTT task reconnects every 10 s; subscriptions are sent again unless the broker kept the session. |
@@ -56,7 +56,7 @@ cargo run --features insecure-dev-store
 | `pulsar/<id>/state` | board → broker | Retained JSON, sent on connect and every minute (see below). |
 | `pulsar/<id>/cmd/ping` | broker → board | Any text. The board publishes it on `pulsar/<id>/pong`. |
 | `pulsar/<id>/cmd/notice` | broker → board | Text for the screen, shown for 30 s instead of the weather. ASCII only (other characters become `?`), at most 100 characters. |
-| `pulsar/<id>/cmd/restart` | broker → board | Any message restarts the board, except in the first 10 s after the connection came up (see Security notes). |
+| `pulsar/<id>/cmd/restart` | broker → board | Any message restarts the board, once the broker has confirmed that the command is cleared (see Security notes). |
 | `homeassistant/device/pulsar-<id>/config` | board → broker | Retained Home Assistant discovery message. |
 
 The state message:
@@ -103,5 +103,5 @@ RAM is the tight resource on this board: with Wi-Fi, Bluetooth and the display r
 - **Use TLS** (`mqtts://` or `wss://`) for anything beyond a test: with `mqtt://` the password and every command cross the network in clear text.
 - **Commands have no password of their own.** Anyone who may publish to `pulsar/<id>/cmd/#` can restart the board or write on its screen. Give the board's login read access to its command topics only, and give only people you trust write access to them.
 - The board's login should be allowed to publish only under `pulsar/<id>/` and `homeassistant/device/pulsar-<id>/`, and to subscribe only to `pulsar/<id>/cmd/+`.
-- A command published *retained* is replayed by the broker after every subscribe. The board ignores a `restart` that comes within 10 s of the connection coming up (`RESTART_GRACE`), whatever the access rules say, and also tries to clear it on the broker, so a mistake cannot lock it in a restart loop. A real `restart` inside that window has to be sent again. Empty messages are never commands.
+- A command published *retained* is replayed by the broker after every subscribe, whenever the broker likes. So on `restart` the board first clears the command (an empty retained message) and restarts only when the broker passes that message on to its subscribers, the board's own subscription included. That echo means the broker processed the clear and removed the retained command, so a mistake cannot lock the board in a restart loop. If the board may not publish to the command topic, or the clear is lost, no echo comes within 10 s (`RESTART_CONFIRM_WAIT`), the board stays up and the log says why. Empty messages are never commands of their own.
 - Payloads and credentials are never logged. The ESP-IDF client keeps the password in RAM while it runs, and a build made with the environment variables contains it in the firmware image (as with the Wi-Fi password).

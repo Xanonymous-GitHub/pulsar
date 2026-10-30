@@ -384,15 +384,18 @@ fn dispatch(client: &Weak<Shared>, inbound: &Inbound) {
 
 /// The settings for the ESP-IDF client.
 fn configuration<'a>(settings: &'a Settings, options: &'a Options) -> MqttClientConfiguration<'a> {
-    // For MQTT 5 the connect properties ask the broker to keep the session a while, to hold back
-    // the Last Will so that a quick reconnect cancels it, and to stay within our limits.
+    // For MQTT 5 the connect properties keep the session a while and hold back the Last Will, so
+    // that a quick reconnect resumes the session and cancels the will. That only works with a kept
+    // session: a clean start ends the old session, and the broker then sends the will at once. So
+    // without one the client asks for neither (the session ends at the disconnect).
+    let kept = options.persistent_session;
     let (protocol_version, mqtt5_connection_property) = match MQTT_VERSION {
         MqttVersion::V3_1_1 => (MqttProtocolVersion::V3_1_1, None),
         MqttVersion::V5 => (
             MqttProtocolVersion::V5,
             Some(Mqtt5ConnectionPropertyConfig {
-                session_expiry_interval: Some(seconds(MQTT_SESSION_EXPIRY)),
-                will_delay_interval: Some(seconds(MQTT_WILL_DELAY)),
+                session_expiry_interval: kept.then(|| seconds(MQTT_SESSION_EXPIRY)),
+                will_delay_interval: kept.then(|| seconds(MQTT_WILL_DELAY)),
                 receive_maximum: Some(MQTT_RECEIVE_MAXIMUM),
                 maximum_packet_size: u32::try_from(MQTT_MAX_INCOMING_BYTES + PACKET_OVERHEAD_BYTES)
                     .ok(),
@@ -414,7 +417,7 @@ fn configuration<'a>(settings: &'a Settings, options: &'a Options) -> MqttClient
             qos: will.qos.into(),
             retain: will.retain,
         }),
-        disable_clean_session: options.persistent_session,
+        disable_clean_session: kept,
         task_stack: if settings.uses_tls() {
             MQTT_TLS_TASK_STACK_BYTES
         } else {
