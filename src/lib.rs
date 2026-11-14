@@ -11,10 +11,11 @@
 //! - [`ui`]: the OLED (status bar and scrolling message).
 //! - [`bluetooth`]: Bluetooth LE (pairing, services, advertising, scanning).
 //! - [`wifi`]: joining a WPA3 network.
-//! - [`clock`]: the wall clock, set with SNTP (TLS needs it).
+//! - [`clock`]: the wall clock, set with SNTP (TLS needs it), and the local time zone.
 //! - [`http`]: an HTTP/HTTPS client (HTTP/1.1, TLS 1.3).
 //! - [`message`]: the scrolling text, shared between the thread that fetches it and the screen.
-//! - [`weather`]: the Taipei forecast, fetched over HTTPS.
+//! - [`location`]: where the board is, from its network address.
+//! - [`weather`]: the forecast for that place, fetched over HTTPS; it also tells the time zone.
 //! - [`mqtt`]: an MQTT client (3.1.1 and 5.0, TLS and WebSocket).
 //! - [`telemetry`]: what the board does over MQTT: state, commands, availability.
 //! - [`home_assistant`]: the discovery message that lets Home Assistant find the board.
@@ -26,6 +27,7 @@ pub mod config;
 pub mod home_assistant;
 pub mod http;
 pub mod led;
+pub mod location;
 pub mod message;
 pub mod mqtt;
 pub mod platform;

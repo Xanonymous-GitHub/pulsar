@@ -140,6 +140,17 @@ pub fn uptime() -> Duration {
     Duration::from_micros(u64::try_from(micros).unwrap_or_default())
 }
 
+/// Makes the SNTP client start over: it asks its servers for the time again after its start-up
+/// delay (at most a few seconds) instead of waiting for its retry timer, which backs off for
+/// tens of seconds when the first queries went out before the network was up. Returns whether
+/// SNTP is running; it does nothing otherwise.
+#[must_use]
+pub fn sntp_restart() -> bool {
+    // SAFETY: the function takes no arguments and has no preconditions. It only queues a
+    // restart on the network task, and does nothing when SNTP has not been started.
+    unsafe { sys::sntp_restart() }
+}
+
 /// Restarts the chip. Never returns.
 pub fn restart() -> ! {
     // SAFETY: the function takes no arguments and has no preconditions. It runs the shutdown

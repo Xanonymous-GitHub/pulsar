@@ -68,24 +68,63 @@ pub const HOSTNAME: &str = "pulsar";
 /// time.
 pub const CLOCK_VALID_AFTER: Duration = Duration::from_hours(490_896);
 
-/// The local time zone as an offset from UTC. Taipei (Asia/Taipei) is UTC+8 all year, with no
-/// daylight saving time since 1979, so a fixed offset is exact. A zone with daylight saving time
-/// would need a time zone database instead.
-pub const LOCAL_UTC_OFFSET: Duration = Duration::from_hours(8);
+/// The offset of the local time zone from UTC, in seconds, until the weather service has told the
+/// real one (it resolves the zone of the board's location, daylight saving time included, see
+/// `weather`). It is also what stays in use while there is no internet. UTC+8 is Taipei.
+pub const DEFAULT_UTC_OFFSET_SECONDS: i32 = 8 * 3600;
 
-/// Where the weather comes from: the free Open-Meteo forecast API (no key, HTTPS), asked for the
-/// current conditions and today's range at the coordinates of Taipei, in Taipei local time.
-pub const WEATHER_URL: &str = "https://api.open-meteo.com/v1/forecast?latitude=25.05&longitude=121.53&current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTaipei&forecast_days=1";
+/// SNTP is not asked to query its servers again more often than this (see `clock::resync`). The
+/// servers of `pool.ntp.org` ask clients to keep at least this distance.
+pub const CLOCK_RESYNC_MIN_INTERVAL: Duration = Duration::from_secs(15);
 
-/// The place name shown in front of the weather report. It has to match [`WEATHER_URL`].
-pub const WEATHER_PLACE: &str = "Taipei";
+/// Where the board's location comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocationSource {
+    /// From the network: a location service tells the city the board's public address is in.
+    /// This sends one HTTPS request to that service after every Wi-Fi connection and once a day.
+    Network,
+    /// Always [`LOCATION_FALLBACK_PLACE`]: no location service is asked.
+    Fixed,
+}
+
+/// Where the board's location comes from. Change it to [`LocationSource::Fixed`] to stop the
+/// board from asking a location service, or when the network's address is in the wrong city (a
+/// VPN, a mobile provider).
+pub const LOCATION_SOURCE: LocationSource = LocationSource::Network;
+
+/// The place name shown in front of the weather report while the location is not known from the
+/// network (not yet, not at all, or [`LocationSource::Fixed`]). ASCII only.
+pub const LOCATION_FALLBACK_PLACE: &str = "Taipei";
+
+/// Degrees north of [`LOCATION_FALLBACK_PLACE`] (negative: south).
+pub const LOCATION_FALLBACK_LATITUDE: f64 = 25.05;
+
+/// Degrees east of [`LOCATION_FALLBACK_PLACE`] (negative: west).
+pub const LOCATION_FALLBACK_LONGITUDE: f64 = 121.53;
+
+/// How long a location from the network is used before the service is asked again. A new Wi-Fi
+/// connection asks at once, because it may be another network in another place.
+pub const LOCATION_REFRESH: Duration = Duration::from_hours(24);
+
+/// Wait before asking the location services again after all of them failed.
+pub const LOCATION_RETRY: Duration = Duration::from_mins(5);
+
+/// How long one request to a location service may wait for network data. It is shorter than
+/// [`HTTP_TIMEOUT`] because the weather waits behind it.
+pub const LOCATION_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Where the weather comes from: the free Open-Meteo forecast API (no key, HTTPS). The
+/// coordinates are added to this; `timezone=auto` makes the service work out the time zone of
+/// the place, which is also where the clock's offset from UTC comes from.
+pub const WEATHER_API: &str = "https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1";
 
 /// Time between two successful weather updates.
 pub const WEATHER_REFRESH: Duration = Duration::from_mins(15);
 
 /// Wait before trying again after a failed weather update. It doubles after every further
-/// failure up to [`WEATHER_RETRY_MAX`].
-pub const WEATHER_RETRY: Duration = Duration::from_secs(30);
+/// failure up to [`WEATHER_RETRY_MAX`]. It starts short: right after Wi-Fi connects, a first
+/// request sometimes stalls although the network is fine, and the second one then succeeds.
+pub const WEATHER_RETRY: Duration = Duration::from_secs(5);
 
 /// Longest wait between two weather updates while they keep failing.
 pub const WEATHER_RETRY_MAX: Duration = Duration::from_mins(5);
