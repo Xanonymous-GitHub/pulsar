@@ -2,7 +2,7 @@
 name         = "pulsar"
 version      = "0.1.0"
 edition      = "2024"
-rust-version = "1.99"
+rust-version = "1.101"
 description  = "My firmware for the XIAO ESP32-C5 (ESP-IDF, std)"
 
 [[bin]]
@@ -24,7 +24,7 @@ esp32-nimble      = "0.13.0"
 heapless          = { version = "0.9.3", features = ["zeroize"] }
 # `max_level_info` removes debug/trace logging from the binary, so a debug line inside a
 # dependency can never print a Wi-Fi configuration.
-log               = { version = "0.4.34", features = ["max_level_info"] }
+log               = { version = "0.4.35", features = ["max_level_info"] }
 serde             = { version = "1.0.229", features = ["derive"] }
 serde_json        = "1.0.154"
 ssd1306           = "0.10.0"
