@@ -321,3 +321,202 @@ pub fn boot(ram: &mut [u8], boot_args: &str) -> Result<Cpu, BootError> {
         .copy_from_slice(&tree);
     Ok(Cpu::new(RAM_BASE, tree_address))
 }
+
+// These tests need `cpu.rs` and `fdt.rs` next to this file, so they run through the host tool:
+// rustc --edition 2024 --test tools/linux-host.rs -o /tmp/t && /tmp/t
+#[cfg(test)]
+mod tests {
+    use super::super::cpu::Exit;
+    use super::*;
+
+    /// A fake kernel image header that says the kernel occupies `size` bytes.
+    fn header(size: u64) -> Vec<u8> {
+        let mut image = vec![0_u8; IMAGE_HEADER_BYTES];
+        image[0x10..0x18].copy_from_slice(&size.to_le_bytes());
+        image[0x30..0x38].copy_from_slice(b"RISCV\0\0\0");
+        image[0x38..0x3c].copy_from_slice(b"RSC\x05");
+        image
+    }
+
+    fn be32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap())
+    }
+
+    #[test]
+    fn the_kernel_size_comes_from_the_image_header() {
+        assert_eq!(kernel_size(&header(0x0026_8000)), Ok(0x0026_8000));
+        assert_eq!(
+            kernel_size(&[0; IMAGE_HEADER_BYTES]),
+            Err(BootError::NotAKernelImage)
+        );
+        assert_eq!(
+            kernel_size(&header(1)[..0x30]),
+            Err(BootError::NotAKernelImage)
+        );
+        assert_eq!(
+            kernel_size(&[0xff; 4 * 1024]),
+            Err(BootError::NotAKernelImage)
+        );
+    }
+
+    #[test]
+    fn boot_puts_the_device_tree_right_behind_the_kernel() {
+        let mut ram = vec![0_u8; 1024 * 1024];
+        ram[..IMAGE_HEADER_BYTES].copy_from_slice(&header(0x5001));
+        let cpu = boot(&mut ram, "console=ttyS0").unwrap();
+
+        assert_eq!(cpu.pc(), RAM_BASE, "execution starts at the image");
+        assert_eq!(cpu.reg(10), 0, "a0: the hart number");
+        let tree_address = cpu.reg(11);
+        assert_eq!(
+            tree_address,
+            RAM_BASE + 0x6000,
+            "a1: the next page after the kernel"
+        );
+
+        let tree = &ram[0x6000..];
+        assert_eq!(be32(tree, 0), super::super::fdt::MAGIC);
+        let total = be32(tree, 4) as usize;
+        assert!(
+            tree[..total]
+                .windows(13)
+                .any(|window| window == b"console=ttyS0")
+        );
+        assert!(
+            ram[0x5001..0x6000].iter().all(|&byte| byte == 0),
+            "nothing else was written"
+        );
+    }
+
+    #[test]
+    fn the_kernel_is_told_about_all_of_the_ram() {
+        // The memory node's `reg` is <0 RAM_BASE 0 size>: find it by its first three cells.
+        let memory_size = |ram_bytes: usize| {
+            let mut ram = vec![0_u8; ram_bytes];
+            ram[..IMAGE_HEADER_BYTES].copy_from_slice(&header(0x1000));
+            boot(&mut ram, "").unwrap();
+            let tree = &ram[0x1000..0x1000 + 4096];
+            let needle = [
+                0_u32.to_be_bytes(),
+                RAM_BASE.to_be_bytes(),
+                0_u32.to_be_bytes(),
+            ]
+            .concat();
+            let at = tree
+                .windows(12)
+                .position(|window| window == needle)
+                .unwrap();
+            be32(tree, at + 12)
+        };
+        assert_eq!(memory_size(8 * 1024 * 1024), 8 * 1024 * 1024);
+        assert_eq!(
+            memory_size(1024 * 1024 + 4095),
+            1024 * 1024,
+            "down to a whole page"
+        );
+    }
+
+    #[test]
+    fn boot_refuses_what_cannot_work() {
+        let mut ram = vec![0_u8; 64 * 1024];
+        assert_eq!(boot(&mut ram, "").unwrap_err(), BootError::NotAKernelImage);
+
+        // The kernel fits, but the device tree behind it does not.
+        ram[..IMAGE_HEADER_BYTES].copy_from_slice(&header(63 * 1024));
+        assert!(matches!(
+            boot(&mut ram, ""),
+            Err(BootError::TooLittleRam { .. })
+        ));
+
+        ram[..IMAGE_HEADER_BYTES].copy_from_slice(&header(u64::MAX));
+        assert!(matches!(
+            boot(&mut ram, ""),
+            Err(BootError::TooLittleRam { .. })
+        ));
+    }
+
+    #[test]
+    fn the_uart_prints_takes_input_and_always_can_send() {
+        let mut devices = Devices::new();
+        assert_eq!(
+            devices.load(UART_LINE_STATUS),
+            0x60,
+            "ready to send, nothing received"
+        );
+        assert_eq!(devices.push_input(b"ok"), 2);
+        assert_eq!(devices.load(UART_LINE_STATUS), 0x61);
+        assert_eq!(devices.load(UART_BASE), u32::from(b'o'));
+        assert_eq!(devices.load(UART_BASE), u32::from(b'k'));
+        assert_eq!(devices.load(UART_LINE_STATUS), 0x60);
+        assert_eq!(
+            devices.load(UART_BASE),
+            0,
+            "reading with nothing there gives zero"
+        );
+
+        assert_eq!(devices.store(UART_BASE, u32::from(b'h')), None);
+        assert_eq!(devices.store(UART_BASE, 0x169), None);
+        let mut printed = Vec::new();
+        devices.take_output(|bytes| printed.extend_from_slice(bytes));
+        assert_eq!(printed, b"hi", "one byte per store");
+        devices.take_output(|_| panic!("the output was handed out already"));
+    }
+
+    #[test]
+    fn the_baud_rate_divisor_is_not_printed() {
+        let mut devices = Devices::new();
+        devices.store(UART_LINE_CONTROL, 0x83); // divisor access on
+        devices.store(UART_BASE, 0x6d);
+        devices.store(UART_BASE + 1, 0);
+        devices.store(UART_LINE_CONTROL, 0x03); // and off again
+        devices.store(UART_BASE, u32::from(b'x'));
+        let mut printed = Vec::new();
+        devices.take_output(|bytes| printed.extend_from_slice(bytes));
+        assert_eq!(printed, b"x");
+    }
+
+    #[test]
+    fn input_the_guest_does_not_read_is_refused_not_lost() {
+        let mut devices = Devices::new();
+        let typed = [b'a'; INPUT_QUEUE_BYTES + 10];
+        assert_eq!(devices.push_input(&typed), INPUT_QUEUE_BYTES);
+        assert_eq!(devices.input_space(), 0);
+        assert_eq!(devices.push_input(b"b"), 0);
+        devices.load(UART_BASE);
+        assert_eq!(devices.push_input(b"bc"), 1);
+    }
+
+    #[test]
+    fn the_power_switch_stops_or_restarts_the_machine() {
+        let mut devices = Devices::new();
+        assert_eq!(devices.store(SYSCON_BASE, 0x5555), Some(Signal::PowerOff));
+        assert_eq!(devices.store(SYSCON_BASE, 0x7777), Some(Signal::Reboot));
+        assert_eq!(devices.store(SYSCON_BASE, 0x1234), None);
+        assert_eq!(devices.store(SYSCON_BASE + 4, 0x5555), None);
+    }
+
+    #[test]
+    fn a_guest_program_prints_through_the_uart_and_powers_off() {
+        // lui x1, 0x10000 ; addi x2, x0, 'A' ; sb x2, 0(x1) ; lui x3, 0x11100 ;
+        // lui x4, 5 ; addi x4, x4, 0x555 ; sw x4, 0(x3)
+        let program: [u32; 7] = [
+            0x1000_00b7,
+            0x0410_0113,
+            0x0020_8023,
+            0x1110_01b7,
+            0x0000_5237,
+            0x5552_0213,
+            0x0041_a023,
+        ];
+        let mut ram = vec![0_u8; 4096];
+        for (index, word) in program.iter().enumerate() {
+            ram[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
+        }
+        let mut cpu = Cpu::new(RAM_BASE, 0);
+        let mut devices = Devices::new();
+        assert_eq!(cpu.run(&mut ram, &mut devices, 0, 100), Exit::PowerOff);
+        let mut printed = Vec::new();
+        devices.take_output(|bytes| printed.extend_from_slice(bytes));
+        assert_eq!(printed, b"A");
+    }
+}

@@ -29,6 +29,18 @@ jobs:
         run: rustup toolchain install
       - run: cargo fmt --all -- --check
 
+  host-tests:
+    name: Host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install the pinned toolchain
+        run: rustup toolchain install
+      # The modules that import nothing from the crate, and the Linux emulator.
+      - run: tools/host-tests.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -64,3 +76,19 @@ jobs:
         with:
           name: pulsar-firmware
           path: target/riscv32imac-esp-espidf/release/pulsar
+
+  linux:
+    name: Linux guest (clippy, build)
+    runs-on: ubuntu-latest
+    env:
+      # The PSRAM settings that the `linux` feature needs, on top of the usual ones.
+      ESP_IDF_SDKCONFIG_DEFAULTS: sdkconfig.defaults;sdkconfig.defaults.linux
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache-key: cargo-linux
+      - run: cargo clippy --locked --features linux -- -D warnings
+      - run: cargo build --locked --features linux

@@ -146,4 +146,3 @@ CONFIG_UPTIME=y
 # CONFIG_HUSH_ULIMIT is not set
 # CONFIG_HUSH_TIMES is not set
 # CONFIG_HUSH_TRAP is not set
-# CONFIG_HUSH_UMASK is not set
