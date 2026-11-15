@@ -1,5 +1,11 @@
 [toolchain]
-# `riscv32imac-esp-espidf` is a tier 3 target: it needs nightly and a `build-std` of the standard library.
+# Why nightly and not the stable release (checked with stable 1.100.0 on 2026-11-15):
+# - `riscv32imac-esp-espidf` is a tier 3 target, so no toolchain ships a standard library for it
+#   (`rustup target add` fails). It is built from source with cargo's `build-std`, and stable
+#   cargo refuses that: "the `-Z` flag is only accepted on the nightly channel".
+# - The Bluetooth crate `esp32-nimble` turns on two unstable features (`decl_macro`,
+#   `get_mut_unchecked`).
+# This crate itself uses no unstable feature, so both are worth checking again from time to time.
 # Pinned to the newest nightly whose `std` builds for it: from nightly-2026-10-20 on, `std` reads
 # `libc::stat.st_atime` while libc 0.2.191 only has `st_atim` for ESP-IDF. Checked again with
 # nightly-2026-11-14: still broken (libc 0.2.191 is still the newest). Move this forward when that is fixed.

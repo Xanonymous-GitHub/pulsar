@@ -14,6 +14,7 @@ Firmware for the Seeed XIAO ESP32-C5 on the Seeeduino XIAO Expansion Board. Rust
 ## Project learnings
 
 - The package/bin is named `pulsar`. The directory was renamed from `esp32-c5`; `esp32-c5` is stale and should not reappear.
+- Stable Rust cannot build this (checked with 1.100.0): the target is tier 3 with no prebuilt `std`, cargo's `build-std` is nightly-only, and `esp32-nimble` uses the unstable features `decl_macro` and `get_mut_unchecked`. The crate's own code uses none.
 - The nightly is pinned to `nightly-2026-10-19`: from 2026-10-20 `std` reads `libc::stat.st_atime` but libc 0.2.191 has only `st_atim` for ESP-IDF, so the `std` build fails (still so with nightly-2026-11-14, checked 2026-11-15). Raise the pin only after a test build: a scratch crate with the same `.cargo/config.toml` and `cargo +<nightly> check` shows it in a minute.
 - Do NOT put `CONFIG_PARTITION_TABLE_*` in `sdkconfig.defaults`: `esp-idf-sys` builds a stub app and cannot find `partitions.csv`. The table is applied at flash time (`--partition-table partitions.csv` in the runner), so run `cargo run` from the project root.
 - `cargo run` flashes fine but its monitor needs a TTY. Read logs with `espflash monitor --non-interactive`, and redirect to a file (a pipe into `head` buffers and hangs).
