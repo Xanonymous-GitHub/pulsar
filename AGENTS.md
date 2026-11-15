@@ -38,14 +38,17 @@ Firmware for the Seeed XIAO ESP32-C5 on the Seeeduino XIAO Expansion Board. Rust
 - `esp32-nimble` is vendored in `vendor/esp32-nimble` (`[patch.crates-io]`, see `PATCHES.md` there): upstream `todo!()`s on pairing actions a peer can trigger (remote abort), races on the subscriber list, and an MTU underflow on notify. Drop it when upstream fixes both; re-apply the patches when bumping the crate.
 - `espflash monitor` right after flashing can fail with `Broken pipe` (the USB port re-enumerates): wait a few seconds and retry.
 - On this nightly `Atomic*::fetch_update` is renamed `try_update`; the deprecation fails `clippy -D warnings`.
+- On the C5 (it has an 802.15.4 radio) `esp_efuse_mac_get_default` writes 8 bytes, an EUI-64 with two bytes put in the middle of the MAC, not 6. Read MAC addresses with `esp_read_mac` into an 8-byte buffer (`platform::base_mac`); the old 6-byte call overflowed the stack and gave every board an id like `feff??`.
+- Two TLS handshakes at once exhaust the heap (`-0x008D`, `Dynamic Impl: alloc(8533 bytes) failed`, free heap down to 840 bytes). `src/handshake.rs` lets one run at a time: `http::Client::send` takes a turn, the MQTT client takes one before it starts and keeps it until its outbox is empty, and the MQTT task announces reconnections with `BeforeConnect` (it cannot wait there).
 - `CONFIG_MQTT_PROTOCOL_5=y` is required: `esp-idf-svc` gates the MQTT 5 types on it. Commit `components_esp32c5.lock` (the MQTT component is fetched into it).
 - Never wait or lock inside the `esp-mqtt` event callback (the MQTT task holds the client lock there); the blocking `EspMqttConnection` API deadlocks when its reader publishes.
 - A retained command is replayed by the broker after every subscribe, at any time, and `esp-idf-svc` does not expose the retain flag. So `restart` reboots only after the broker echoes the board's own empty retained clear (`src/telemetry/confirmation.rs`); a time window cannot tell a late replay from a real command.
 - MQTT 5 session expiry and Will Delay work only with a kept session (`persistent_session`): a clean start ends the old session and the broker sends the Will at once.
-- `cargo test` cannot run (device-only crate, `harness = false`). Pure modules with no crate imports are tested on the host: `rustc --edition 2024 --test src/mqtt/topic.rs -o /tmp/t && /tmp/t` (same for `src/mqtt/reassemble.rs`, `src/mqtt/budget.rs` and `src/telemetry/confirmation.rs`).
+- `cargo test` cannot run (device-only crate, `harness = false`). Pure modules with no crate imports are tested on the host: `rustc --edition 2024 --test src/mqtt/topic.rs -o /tmp/t && /tmp/t` (same for `src/mqtt/reassemble.rs`, `src/mqtt/budget.rs`, `src/telemetry/confirmation.rs` and `src/handshake.rs`).
 - Clippy `doc_markdown` rejects a bare `QoS` in doc comments: write it in backticks.
 - Heap is the tight resource (about 80 KB free with Wi-Fi, BLE and the display on; a thread costs its whole stack). Measure with the `MQTT online, free heap ...` log line before adding threads or buffers.
-- TLS error `-0x008D` (PSA out of memory) or `alloc(16725 bytes) failed` means the heap ran dry; see the mbedTLS settings in `sdkconfig.defaults` and the 6 KiB MQTT message cap.
+- TLS error `-0x008D` (PSA out of memory) or `alloc(16725 bytes) failed` means the heap ran dry; see the mbedTLS settings in `sdkconfig.defaults`, the 6 KiB MQTT message cap and `src/handshake.rs`.
+- `tools/mqtt-check.sh` checks a running board through its broker (14 checks). The board's Wi-Fi may not reach a broker on the development computer: a guest or IoT network is often cut off from the main one.
 - `eim_config.toml` and the Espressif Installation Manager install are not used by the Rust build.
 
 ## Useful references

@@ -97,6 +97,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/bluetooth/` | Bluetooth LE: stack set-up and pairing (`mod.rs`), advertising sets, GATT services, bonds in the secret store, scanning. |
 | `src/clock.rs` | SNTP and the local time of day. |
 | `src/http.rs` | The HTTP/HTTPS client. |
+| `src/handshake.rs` | Lets one TLS handshake run at a time: two do not fit in the heap. |
 | `src/weather.rs` | Fetches the forecast and turns it into the scrolling text. |
 | `src/message.rs` | The scrolling text shared between the weather thread and the screen, with timed notices. |
 | `src/mqtt/` | The MQTT client (`mod.rs`, `client.rs`), the broker settings in the secret store, topic matching and the hand-over from the MQTT task. |
@@ -105,6 +106,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/ui/` | The screen: status bar (Wi-Fi, clock, Bluetooth icon) and scrolling text. |
 | `src/led.rs` | The blinking LED. |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
+| `tools/mqtt-check.sh` | Checks a running board through its MQTT broker, see [docs/mqtt.md](docs/mqtt.md). |
 | `partitions.csv` | Flash layout, including the `secrets` and `nvs_keys` partitions. |
 | `sdkconfig.defaults` | ESP-IDF settings for development. |
 | `sdkconfig.defaults.secure` | Flash encryption overlay. Applied only by you. |

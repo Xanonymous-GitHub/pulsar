@@ -14,6 +14,7 @@
 
 use std::mem::size_of;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ use esp_idf_svc::mqtt::client::{Details, EspMqttEvent, EventPayload};
 use super::budget::Budget;
 use super::reassemble::Chunk;
 use crate::config::MQTT_QUEUE_BYTES;
+use crate::handshake;
 
 /// What the MQTT task reports, copied out of its buffers.
 #[derive(Debug)]
@@ -57,18 +59,25 @@ impl Event {
     }
 }
 
-/// A new channel: the end for the MQTT task and the end for the dispatcher thread.
-pub fn channel() -> (Outbound, Inbound) {
+/// A new channel: the end for the MQTT task and the end for the dispatcher thread. With
+/// `tls`, the connection attempts of the MQTT task take part in [`handshake`].
+pub fn channel(tls: bool) -> (Outbound, Inbound) {
     let (events, receiver) = mpsc::channel();
     let queued = Arc::new(Budget::new(MQTT_QUEUE_BYTES));
+    let turn = Arc::new(HandshakeTurn {
+        tls,
+        taken: AtomicBool::new(false),
+    });
     (
         Outbound {
             events,
             queued: Arc::clone(&queued),
+            turn: Arc::clone(&turn),
         },
         Inbound {
             events: receiver,
             queued,
+            turn,
         },
     )
 }
@@ -78,6 +87,55 @@ pub struct Outbound {
     events: Sender<Event>,
     /// What the message pieces on the channel hold.
     queued: Arc<Budget>,
+    /// The client's turn at the handshake gate.
+    turn: Arc<HandshakeTurn>,
+}
+
+/// The client's turn at the [handshake gate](handshake), shared by both ends of the channel. It
+/// starts before a connection attempt and ends when the attempt has failed, or when the
+/// connection is up and what was waiting to be sent has gone out.
+struct HandshakeTurn {
+    /// The connection is a TLS connection. Others do not take turns.
+    tls: bool,
+    /// The gate was entered and not left yet.
+    taken: AtomicBool,
+}
+
+impl HandshakeTurn {
+    /// Waits for a turn, for at most `patience`.
+    fn begin_in_turn(&self, patience: Duration) {
+        if self.tls && !self.taken.swap(true, Ordering::AcqRel) {
+            handshake::enter_in_turn(patience);
+        }
+    }
+
+    /// Starts a turn without waiting (for the MQTT task's callback).
+    fn begin(&self) {
+        if self.tls && !self.taken.swap(true, Ordering::AcqRel) {
+            handshake::enter();
+        }
+    }
+
+    fn end(&self) {
+        if self.taken.swap(false, Ordering::AcqRel) {
+            handshake::leave();
+        }
+    }
+}
+
+impl Drop for HandshakeTurn {
+    fn drop(&mut self) {
+        // The client is gone in the middle of an attempt: nobody must wait for it any more.
+        self.end();
+    }
+}
+
+impl Outbound {
+    /// Waits for a turn at the handshake gate for the first connection attempt, which the MQTT
+    /// task makes as soon as the client is created. Call it right before that.
+    pub fn take_first_turn(&self, patience: Duration) {
+        self.turn.begin_in_turn(patience);
+    }
 }
 
 /// Wakes the dispatcher thread from anywhere.
@@ -102,9 +160,22 @@ impl Outbound {
     /// Copies `event` onto the channel without waiting. Events that are of no use are skipped.
     pub fn forward(&self, event: &EspMqttEvent<'_>) {
         let event = match event.payload() {
+            // A connection attempt (the first, or a reconnection) starts: other TLS connections
+            // wait until it is over. The task cannot wait for a turn itself in this callback.
+            EventPayload::BeforeConnect => {
+                self.turn.begin();
+                return;
+            }
+            // The turn goes on: the dispatcher ends it with `Inbound::connection_settled`.
             EventPayload::Connected(session_present) => Event::Connected { session_present },
-            EventPayload::Disconnected => Event::Disconnected,
-            EventPayload::Error(_) => Event::Failed,
+            EventPayload::Disconnected => {
+                self.turn.end();
+                Event::Disconnected
+            }
+            EventPayload::Error(_) => {
+                self.turn.end();
+                Event::Failed
+            }
             EventPayload::Received {
                 topic,
                 data,
@@ -143,6 +214,8 @@ impl Outbound {
 pub struct Inbound {
     events: Receiver<Event>,
     queued: Arc<Budget>,
+    /// The client's turn at the handshake gate.
+    turn: Arc<HandshakeTurn>,
 }
 
 /// What the dispatcher thread woke up for.
@@ -156,6 +229,12 @@ pub enum Wake {
 }
 
 impl Inbound {
+    /// The connection is up and its first messages have gone out: the client's turn at the
+    /// handshake gate ends, and another TLS connection may be set up.
+    pub fn connection_settled(&self) {
+        self.turn.end();
+    }
+
     /// Waits for the next event, for at most `timeout` (for ever if `None`).
     pub fn recv(&self, timeout: Option<Duration>) -> Wake {
         let received = match timeout {

@@ -48,7 +48,7 @@ cargo run --features insecure-dev-store
 
 ## Topics
 
-`<id>` is the last three bytes of the MAC address in hex (for example `a1b2c3`). The client id is `pulsar-<id>`.
+`<id>` is the last three bytes of the board's MAC address in hex (for example `a1b2c3`), the address the router shows. The client id is `pulsar-<id>`.
 
 | Topic | Direction | Content |
 |---|---|---|
@@ -88,7 +88,18 @@ mosquitto_pub -h broker.example.org -t pulsar/a1b2c3/cmd/notice -m 'Hi there' # 
 mosquitto_pub -h broker.example.org -t pulsar/a1b2c3/cmd/restart -m now
 ```
 
-To check long messages, publish more than 2 KiB (and less than 6 KiB) to a command topic, for example `ping`, and look for the same text on `pong`. More than 6 KiB is dropped, with a warning in the log.
+## Check a board
+
+`tools/mqtt-check.sh` checks a running board from your computer, through the broker (it needs the mosquitto clients and `python3`):
+
+```sh
+tools/mqtt-check.sh -h broker.example.org --tls            # add -u user -P password-file, -p port
+tools/mqtt-check.sh -h broker.example.org --tls --restart  # also restarts the board
+```
+
+It looks at the retained availability, state and Home Assistant discovery messages, sends `ping` at every QoS, checks that messages of 3000 and 6000 bytes come back whole and that one of 7000 bytes is dropped, sends a `notice`, waits for the next state message, and with `--restart` sends the restart command and checks that the board goes offline, comes back, and leaves no retained command behind. It prints `PASS` or `FAIL` for each and ends with a non-zero status if anything failed.
+
+To check long messages by hand, publish more than 2 KiB (and less than 6 KiB) to a command topic, for example `ping`, and look for the same text on `pong`. More than 6 KiB is dropped, with a warning in the log.
 
 ## Memory
 
@@ -96,7 +107,19 @@ RAM is the tight resource on this board: with Wi-Fi, Bluetooth and the display r
 
 - Telemetry has no thread of its own after start-up: its set-up thread ends, and the state goes out from the client's thread (`Client::every`).
 - `sdkconfig.defaults` turns on mbedTLS **dynamic buffers** and caps the **TLS record size at 8 KiB**. Without them a TLS session keeps about 20 KB resident and needs a free 16 KiB block for every record; with MQTT over TLS next to the weather requests that ran the heap out (`alloc(16725 bytes) failed`, handshake error `-0x008D`). The price: a server that sends a TLS record longer than 8 KiB breaks the connection. That is why incoming MQTT messages are limited to 6 KiB.
-- With MQTT running the heap stays above about 20 KB at its lowest (measured while the weather's TLS handshake ran). If you add more features, watch the line `MQTT online, free heap ... (lowest ..., largest block ...)` in the log.
+- **One TLS handshake at a time** (`src/handshake.rs`). A handshake needs 30 to 40 KB for a moment, so two at once ran the heap dry: at every boot the weather request and the MQTT connection started together, one of them failed with `-0x008D`, and the free heap went as low as 840 bytes. Now an HTTPS request and the MQTT client's first connection wait for each other's handshake, and the MQTT client keeps its turn until its first messages have left. A reconnection of the MQTT task cannot wait (it is announced from a callback), but HTTPS requests wait for it.
+- With MQTT running the heap stays above about 20 KB at its lowest (measured while the weather's TLS handshake ran, and at start-up: 22 to 28 KB over six boots). If you add more features, watch the line `MQTT online, free heap ... (lowest ..., largest block ...)` in the log.
+
+## Tested on the board
+
+Run on a XIAO ESP32-C5 on 2026-11-15 with `tools/mqtt-check.sh --restart`, against `test.mosquitto.org` (mosquitto, MQTT 5):
+
+| Connection | Result |
+|---|---|
+| `mqtts://` port 8886 (TLS 1.3, Let's Encrypt certificate, no login) | 14 of 14 checks pass |
+| `wss://` port 8091 (WebSocket over TLS, username and password) | 12 of 12 checks pass (without `--restart`) |
+
+Not tested on the board: plain `mqtt://` and `ws://` end to end (the test network could not reach a local broker; the board was only seen retrying), MQTT 3.1.1, a kept session with the delayed Last Will, and Home Assistant itself reading the discovery message.
 
 ## Security notes
 

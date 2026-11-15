@@ -33,6 +33,8 @@
 //!
 //! # Things to know
 //!
+//! - An HTTPS request first waits for any other TLS connection that is being set up (the MQTT
+//!   client's, or another request's), see [`crate::handshake`].
 //! - Every [`Client::send`] opens a new connection (a new TLS handshake for HTTPS), so there is no
 //!   keep-alive between requests. `esp_http_client` would keep the headers of the previous request
 //!   on a reused connection, which could send an `Authorization` header to the wrong host, and
@@ -53,7 +55,9 @@ use esp_idf_svc::sys::{self, EspError};
 use crate::clock;
 use crate::config::{
     HTTP_CLOCK_WAIT, HTTP_MAX_BODY_BYTES, HTTP_RX_BUFFER_BYTES, HTTP_TIMEOUT, HTTP_TX_BUFFER_BYTES,
+    TLS_HANDSHAKE_PATIENCE,
 };
+use crate::handshake;
 
 /// Bytes read from the connection at a time when reading a whole body.
 const READ_CHUNK_BYTES: usize = 1024;
@@ -324,6 +328,12 @@ impl Client {
         if request.is_https() && !clock::wait_synced(HTTP_CLOCK_WAIT) {
             return Err(Error::ClockNotSynced);
         }
+
+        // One TLS handshake at a time: two do not fit in the heap. The turn lasts until the
+        // headers of the response are in, when the handshake is long over.
+        let _turn = request
+            .is_https()
+            .then(|| handshake::take_turn(TLS_HANDSHAKE_PATIENCE));
 
         // A new connection for every request, see the module documentation.
         let mut connection = EspHttpConnection::new(&self.configuration)?;
