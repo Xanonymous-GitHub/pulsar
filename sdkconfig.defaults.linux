@@ -1,0 +1,21 @@
+# ESP-IDF settings for a build with the `linux` feature, on top of sdkconfig.defaults:
+#
+#   ESP_IDF_SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.linux' \
+#       cargo run --features linux,insecure-dev-store
+#
+# See docs/linux.md.
+
+# The 8 MiB of PSRAM in the ESP32-C5 of the XIAO board: the RAM of the Linux guest.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+# Map it, and give it to no allocator: src/platform.rs hands all of it to the guest. The guest
+# needs every page (a no-MMU kernel loads each program into one contiguous block), and the rest of
+# the firmware keeps using internal RAM exactly as before.
+CONFIG_SPIRAM_USE_MEMMAP=y
+# A board without PSRAM still boots; the log then says that Linux was not started.
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# The console (the log and the guest's serial port) on the USB port, in both directions. The
+# default is the UART pins, with USB as a second output only, which cannot take input.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

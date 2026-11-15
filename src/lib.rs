@@ -15,6 +15,7 @@
 //! - [`http`]: an HTTP/HTTPS client (HTTP/1.1, TLS 1.3).
 //! - [`message`]: the scrolling text, shared between the thread that fetches it and the screen.
 //! - [`weather`]: the Taipei forecast, fetched over HTTPS.
+//! - [`linux`]: an emulated RISC-V computer that runs Linux (started only with the `linux` feature).
 //! - [`mqtt`]: an MQTT client (3.1.1 and 5.0, TLS and WebSocket).
 //! - [`telemetry`]: what the board does over MQTT: state, commands, availability.
 //! - [`home_assistant`]: the discovery message that lets Home Assistant find the board.
@@ -26,6 +27,7 @@ pub mod config;
 pub mod home_assistant;
 pub mod http;
 pub mod led;
+pub mod linux;
 pub mod message;
 pub mod mqtt;
 pub mod platform;
@@ -35,3 +37,9 @@ pub mod telemetry;
 pub mod ui;
 pub mod weather;
 pub mod wifi;
+
+#[cfg(all(feature = "linux", not(esp_idf_spiram_use_memmap)))]
+compile_error!(
+    "the `linux` feature needs the PSRAM settings of sdkconfig.defaults.linux: build with \
+     ESP_IDF_SDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.linux' (see docs/linux.md)"
+);

@@ -1,0 +1,12 @@
+# /etc/inittab of the pulsar Linux guest (BusyBox init: the runlevel field is ignored).
+# Format: <tty, or empty for the console>:<ignored>:<action>:<process>
+
+::sysinit:/bin/mount -a
+::sysinit:/bin/hostname -F /etc/hostname
+console::sysinit:/bin/echo "Welcome to Linux on pulsar (XIAO ESP32-C5)"
+
+# A root shell on the console, started again when it exits. No login: the console is the
+# board's USB port.
+console::respawn:-/bin/sh
+
+::shutdown:/bin/umount -a -r
