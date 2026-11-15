@@ -16,7 +16,7 @@ What it does:
 ## Requirements
 
 - A XIAO ESP32-C5 with a USB cable that carries data.
-- `rustup`. The file `rust-toolchain.toml` installs the pinned nightly and `rust-src`. The ESP32-C5 Rust target is tier 3, so it needs nightly and `build-std`.
+- `rustup`. The file `rust-toolchain.toml` installs the pinned nightly and `rust-src`. The ESP32-C5 Rust target is tier 3, so it needs nightly and `build-std`: the stable release has no standard library for it and cannot build one (the reasons are in `rust-toolchain.toml`).
 - `espflash` and `ldproxy`: `cargo install espflash ldproxy --locked`.
 - The ESP-IDF build prerequisites: `git`, `cmake`, `ninja`, `python3` with `venv` and `gzip`, and a C compiler for the host.
 
@@ -109,6 +109,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/clock.rs` | SNTP, the offset of the local time zone, and the local time of day (`clock/local_time.rs`). |
 | `src/location.rs` | The city the board's network is in, from a location service (`location/place.rs` checks coordinates and names). |
 | `src/http.rs` | The HTTP/HTTPS client. |
+| `src/handshake.rs` | Lets one TLS handshake run at a time: two do not fit in the heap. |
 | `src/weather.rs` | Fetches the forecast for the location, turns it into the scrolling text and sets the time zone. |
 | `src/message.rs` | The scrolling text shared between the weather thread and the screen, with timed notices. |
 | `src/mqtt/` | The MQTT client (`mod.rs`, `client.rs`), the broker settings in the secret store, topic matching and the hand-over from the MQTT task. |
@@ -117,6 +118,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/ui/` | The screen: status bar (Wi-Fi, clock, Bluetooth icon) and scrolling text. |
 | `src/led.rs` | The blinking LED. |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
+| `tools/mqtt-check.sh` | Checks a running board through its MQTT broker, see [docs/mqtt.md](docs/mqtt.md). |
 | `partitions.csv` | Flash layout, including the `secrets` and `nvs_keys` partitions. |
 | `sdkconfig.defaults` | ESP-IDF settings for development. |
 | `sdkconfig.defaults.secure` | Flash encryption overlay. Applied only by you. |

@@ -16,11 +16,15 @@ use super::settings::Settings;
 use super::{Error, Message, Options, QoS, topic};
 use crate::clock;
 use crate::config::{
-    HTTP_CLOCK_WAIT, MQTT_KEEP_ALIVE, MQTT_MAX_INCOMING_BYTES, MQTT_NETWORK_TIMEOUT,
-    MQTT_OUTBOX_LIMIT_BYTES, MQTT_RECEIVE_MAXIMUM, MQTT_RECONNECT, MQTT_RX_BUFFER_BYTES,
-    MQTT_SESSION_EXPIRY, MQTT_STACK_BYTES, MQTT_TASK_STACK_BYTES, MQTT_TLS_TASK_STACK_BYTES,
-    MQTT_TX_BUFFER_BYTES, MQTT_VERSION, MQTT_WILL_DELAY, MqttVersion,
+    HTTP_CLOCK_WAIT, MQTT_CONNECT_SETTLE, MQTT_KEEP_ALIVE, MQTT_MAX_INCOMING_BYTES,
+    MQTT_NETWORK_TIMEOUT, MQTT_OUTBOX_LIMIT_BYTES, MQTT_RECEIVE_MAXIMUM, MQTT_RECONNECT,
+    MQTT_RX_BUFFER_BYTES, MQTT_SESSION_EXPIRY, MQTT_STACK_BYTES, MQTT_TASK_STACK_BYTES,
+    MQTT_TLS_TASK_STACK_BYTES, MQTT_TX_BUFFER_BYTES, MQTT_VERSION, MQTT_WILL_DELAY, MqttVersion,
+    TLS_HANDSHAKE_PATIENCE,
 };
+
+/// How often [`Client::wait_for_outbox`] looks at the outbox.
+const OUTBOX_POLL: Duration = Duration::from_millis(50);
 
 /// Room for the packet header and the topic on top of the payload, for the MQTT 5 maximum packet
 /// size we tell the broker.
@@ -99,7 +103,11 @@ impl Client {
             return Err(Error::ClockNotSynced);
         }
 
-        let (outbound, inbound) = session::channel();
+        let (outbound, inbound) = session::channel(settings.uses_tls());
+        // One TLS handshake at a time (see `handshake`): the first connection attempt waits for
+        // a request that is setting up its connection. Later attempts (reconnections) are
+        // announced by the MQTT task from its callback, where it cannot wait.
+        outbound.take_first_turn(TLS_HANDSHAKE_PATIENCE);
         let waker = outbound.waker();
         let esp = EspMqttClient::new_cb(
             settings.url(),
@@ -314,6 +322,15 @@ impl Client {
         }
     }
 
+    /// Waits until everything queued has been sent (and acknowledged, for `QoS` 1 and 2), for
+    /// at most `patience`.
+    fn wait_for_outbox(&self, patience: Duration) {
+        let deadline = Instant::now() + patience;
+        while self.outbox_bytes() > 0 && Instant::now() < deadline {
+            thread::sleep(OUTBOX_POLL);
+        }
+    }
+
     fn on_disconnected(&self) {
         log::warn!("MQTT disconnected from {}", self.0.host);
         lock(&self.0.state).connected = false;
@@ -359,6 +376,11 @@ fn dispatch(client: &Weak<Shared>, inbound: &Inbound) {
             Wake::Event(Event::Connected { session_present }) => {
                 reassembler.reset();
                 client.on_connected(session_present);
+                // What the hooks queued (the discovery message, the state) goes out now, over the
+                // TLS session that was just set up, and uses the heap for it. Only when that is
+                // through may the next TLS handshake start.
+                client.wait_for_outbox(MQTT_CONNECT_SETTLE);
+                inbound.connection_settled();
             }
             Wake::Event(Event::Disconnected) => {
                 reassembler.reset();
