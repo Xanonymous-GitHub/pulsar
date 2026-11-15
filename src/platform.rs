@@ -99,16 +99,26 @@ pub fn random_u32() -> u32 {
     unsafe { sys::esp_random() }
 }
 
-/// The factory-programmed base MAC address of the chip (unique per board).
+/// The MAC address of the board: the factory-programmed one that the Wi-Fi station uses and the
+/// router shows (unique per board).
 ///
 /// # Errors
 ///
 /// Fails if the eFuse block that holds the address cannot be read.
 pub fn base_mac() -> Result<[u8; 6], sys::EspError> {
-    let mut mac = [0_u8; 6];
-    // SAFETY: the function writes exactly 6 bytes to the pointer, which points to a 6-byte array
-    // that is valid for writes for the duration of the call.
-    sys::esp!(unsafe { sys::esp_efuse_mac_get_default(mac.as_mut_ptr()) })?;
+    // ESP-IDF's functions for MAC addresses write 6 or 8 bytes, depending on the kind of address
+    // asked for and on the chip: the ESP32-C5 has an 802.15.4 radio, whose address is 8 bytes
+    // long (an EUI-64). The buffer is 8 bytes whatever is asked, so a longer answer can never
+    // write past it. (`esp_efuse_mac_get_default`, used here before, answers with the 8-byte
+    // form on this chip: the 6-byte address with two more bytes put in the middle.)
+    let mut buffer = [0_u8; 8];
+    // SAFETY: the function writes at most 8 bytes to the pointer (6 for the station address
+    // asked for here), which points to an 8-byte array that is valid for writes for the
+    // duration of the call.
+    sys::esp!(unsafe {
+        sys::esp_read_mac(buffer.as_mut_ptr(), sys::esp_mac_type_t_ESP_MAC_WIFI_STA)
+    })?;
+    let [mac @ .., _, _] = buffer;
     Ok(mac)
 }
 

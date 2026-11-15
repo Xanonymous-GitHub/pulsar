@@ -14,6 +14,7 @@ for file in \
     src/mqtt/reassemble.rs \
     src/mqtt/budget.rs \
     src/telemetry/confirmation.rs \
+    src/handshake.rs \
     tools/linux-host.rs
 do
     echo "== $file"

@@ -16,7 +16,7 @@ What it does:
 ## Requirements
 
 - A XIAO ESP32-C5 with a USB cable that carries data.
-- `rustup`. The file `rust-toolchain.toml` installs the pinned nightly and `rust-src`. The ESP32-C5 Rust target is tier 3, so it needs nightly and `build-std`.
+- `rustup`. The file `rust-toolchain.toml` installs the pinned nightly and `rust-src`. The ESP32-C5 Rust target is tier 3, so it needs nightly and `build-std`: the stable release has no standard library for it and cannot build one (the reasons are in `rust-toolchain.toml`).
 - `espflash` and `ldproxy`: `cargo install espflash ldproxy --locked`.
 - The ESP-IDF build prerequisites: `git`, `cmake`, `ninja`, `python3` with `venv` and `gzip`, and a C compiler for the host.
 
@@ -98,6 +98,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/bluetooth/` | Bluetooth LE: stack set-up and pairing (`mod.rs`), advertising sets, GATT services, bonds in the secret store, scanning. |
 | `src/clock.rs` | SNTP and the local time of day. |
 | `src/http.rs` | The HTTP/HTTPS client. |
+| `src/handshake.rs` | Lets one TLS handshake run at a time: two do not fit in the heap. |
 | `src/weather.rs` | Fetches the forecast and turns it into the scrolling text. |
 | `src/message.rs` | The scrolling text shared between the weather thread and the screen, with timed notices. |
 | `src/mqtt/` | The MQTT client (`mod.rs`, `client.rs`), the broker settings in the secret store, topic matching and the hand-over from the MQTT task. |
@@ -107,6 +108,7 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/led.rs` | The blinking LED. |
 | `src/linux/` | Linux on the board: an emulated RV32IMA processor (`cpu.rs`), its devices (`machine.rs`), the device tree (`fdt.rs`) and the thread that runs the guest (`guest.rs`). |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
+| `tools/mqtt-check.sh` | Checks a running board through its MQTT broker, see [docs/mqtt.md](docs/mqtt.md). |
 | `tools/linux-image/` | Builds the Linux kernel image with Buildroot. |
 | `tools/linux-host.rs` | Boots a kernel image in the same emulator on a desktop computer. |
 | `tools/host-tests.sh` | Runs the unit tests that work on the host. |

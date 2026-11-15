@@ -12,6 +12,7 @@
 //! - [`bluetooth`]: Bluetooth LE (pairing, services, advertising, scanning).
 //! - [`wifi`]: joining a WPA3 network.
 //! - [`clock`]: the wall clock, set with SNTP (TLS needs it).
+//! - [`handshake`]: lets one TLS handshake run at a time (two do not fit in the heap).
 //! - [`http`]: an HTTP/HTTPS client (HTTP/1.1, TLS 1.3).
 //! - [`message`]: the scrolling text, shared between the thread that fetches it and the screen.
 //! - [`weather`]: the Taipei forecast, fetched over HTTPS.
@@ -24,6 +25,7 @@ pub mod bluetooth;
 pub mod board;
 pub mod clock;
 pub mod config;
+pub mod handshake;
 pub mod home_assistant;
 pub mod http;
 pub mod led;
