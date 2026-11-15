@@ -27,7 +27,9 @@
 //!
 //! After every new Wi-Fi connection ([`Locator::invalidate`]), since that may be another network
 //! in another place, and then every [`LOCATION_REFRESH`]. After a failure the last known location
-//! stays, and the services are asked again after [`LOCATION_RETRY`].
+//! stays, and the services are asked again after [`LOCATION_RETRY`]. In no case are they asked
+//! more often than every [`LOCATION_MIN_INTERVAL`]: a connection that keeps dropping must not
+//! become a stream of requests.
 //!
 //! The location is kept in RAM only and is never written to flash.
 
@@ -39,7 +41,8 @@ use serde::Deserialize;
 
 use crate::config::{
     LOCATION_FALLBACK_LATITUDE, LOCATION_FALLBACK_LONGITUDE, LOCATION_FALLBACK_PLACE,
-    LOCATION_REFRESH, LOCATION_RETRY, LOCATION_SOURCE, LOCATION_TIMEOUT, LocationSource,
+    LOCATION_MIN_INTERVAL, LOCATION_REFRESH, LOCATION_RETRY, LOCATION_SOURCE, LOCATION_TIMEOUT,
+    LocationSource,
 };
 use crate::http::{self, Client};
 
@@ -218,6 +221,8 @@ pub struct Locator {
     current: Option<Location>,
     /// When to ask the services next. `None`: never ([`LocationSource::Fixed`]).
     next_lookup: Option<Instant>,
+    /// When the services were last asked, whether they answered or not.
+    last_lookup: Option<Instant>,
 }
 
 impl Locator {
@@ -233,6 +238,7 @@ impl Locator {
             client: Client::new().with_timeout(LOCATION_TIMEOUT),
             current,
             next_lookup: (LOCATION_SOURCE == LocationSource::Network).then(Instant::now),
+            last_lookup: None,
         }
     }
 
@@ -243,12 +249,17 @@ impl Locator {
         self.current.as_ref()
     }
 
-    /// Makes the next [`refresh_if_due`](Self::refresh_if_due) ask the services. Call it when
-    /// Wi-Fi has connected: it may be another network, in another place.
+    /// Makes [`refresh_if_due`](Self::refresh_if_due) ask the services as soon as
+    /// [`LOCATION_MIN_INTERVAL`] has passed since they were last asked (at once if they never
+    /// were). Call it when Wi-Fi has connected: it may be another network, in another place.
     pub fn invalidate(&mut self) {
-        if self.next_lookup.is_some() {
-            self.next_lookup = Some(Instant::now());
-        }
+        let Some(scheduled) = self.next_lookup else {
+            return;
+        };
+        let soonest = self
+            .last_lookup
+            .map_or_else(Instant::now, |last| last + LOCATION_MIN_INTERVAL);
+        self.next_lookup = Some(scheduled.min(soonest));
     }
 
     /// Asks the services if it is time to, which takes a few seconds, and returns whether the
@@ -258,6 +269,7 @@ impl Locator {
         if self.next_lookup.is_none_or(|due| Instant::now() < due) {
             return false;
         }
+        self.last_lookup = Some(Instant::now());
         let Ok(location) = lookup(&self.client) else {
             // Each service has logged why. The last known place stays in use.
             self.next_lookup = Some(Instant::now() + LOCATION_RETRY);

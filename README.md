@@ -55,7 +55,7 @@ They are stored on the chip like the Wi-Fi credentials, so later builds can leav
 
 ## Location and time zone
 
-After every Wi-Fi connection, and then once a day, the board asks a location service which city its public address is in (`src/location.rs`): first `ipwho.is`, then `get.geojs.io` if that fails. The weather forecast is then asked for those coordinates, rounded to a hundredth of a degree (about one kilometre). Open-Meteo also reports the time zone of the place as an offset from UTC that is valid now, and the clock uses it. It is refreshed with every forecast, so a change to or from daylight saving time shows within 15 minutes, without a time zone database on the board.
+After every Wi-Fi connection (but at most every five minutes), and then once a day, the board asks a location service which city its public address is in (`src/location.rs`): first `ipwho.is`, then `get.geojs.io` if that fails. The weather forecast is then asked for those coordinates, rounded to a hundredth of a degree (about one kilometre). Open-Meteo also reports the time zone of the place as an offset from UTC that is valid now, and the clock uses it. It is refreshed with every forecast, so a change to or from daylight saving time shows within 15 minutes, without a time zone database on the board.
 
 What leaves the board for this: one HTTPS request to the location service, which sees the public address it comes from (as every server does) and nothing else, and the rounded coordinates in the request to Open-Meteo. The location is kept in RAM only.
 

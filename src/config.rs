@@ -106,6 +106,11 @@ pub const LOCATION_FALLBACK_LONGITUDE: f64 = 121.53;
 /// connection asks at once, because it may be another network in another place.
 pub const LOCATION_REFRESH: Duration = Duration::from_hours(24);
 
+/// The location services are not asked more often than this, whatever happens. Wi-Fi that keeps
+/// dropping and reconnecting (a weak signal, or someone forcing it) must not turn into a stream
+/// of requests to them.
+pub const LOCATION_MIN_INTERVAL: Duration = Duration::from_mins(5);
+
 /// Wait before asking the location services again after all of them failed.
 pub const LOCATION_RETRY: Duration = Duration::from_mins(5);
 

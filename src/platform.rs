@@ -146,8 +146,10 @@ pub fn uptime() -> Duration {
 /// SNTP is running; it does nothing otherwise.
 #[must_use]
 pub fn sntp_restart() -> bool {
-    // SAFETY: the function takes no arguments and has no preconditions. It only queues a
-    // restart on the network task, and does nothing when SNTP has not been started.
+    // SAFETY: the function takes no arguments and may be called from any task: ESP-IDF's
+    // `sntp_restart` does not touch lwIP's state itself, it hands the stop and start to the
+    // network task with `tcpip_callback` (components/lwip/apps/sntp/sntp.c). It does nothing
+    // when SNTP has not been started.
     unsafe { sys::sntp_restart() }
 }
 
