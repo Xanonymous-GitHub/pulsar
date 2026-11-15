@@ -102,7 +102,7 @@ Measured on a XIAO ESP32-C5 with Linux 7.3.4:
 
 | | |
 |---|---|
-| Speed | about 1.3 million instructions per second |
+| Speed | about 1 million instructions per second (the firmware logs the figure when the guest stops or restarts) |
 | `Run /init` | about 20 seconds after the kernel starts |
 | Shell prompt | a few seconds later |
 | RAM | 8192 KiB for the guest; 4480 KiB free when the kernel starts, about 3 MiB at the prompt |
@@ -117,7 +117,7 @@ Without an MMU Linux loads every running program whole into one contiguous block
 - The guest has all of the PSRAM. The firmware keeps using internal RAM as before.
 - One line in the boot log is expected: `psram_mspi: Failed to allocate dummy cacheline for PSRAM memory barrier!`. ESP-IDF wants a cache line of PSRAM for a workaround that only matters when PSRAM is used for DMA, and the guest's memory never is.
 - The guest's clock starts at zero at every boot. It has no real-time clock.
-- `reboot` in the guest loads the kernel again; `poweroff` stops the guest until the board is reset.
+- `reboot` in the guest loads the kernel from flash again; `poweroff` stops the guest until the board is reset. Both log a line such as `Linux: PowerOff after 52 s and 46 million instructions (887 thousand per second)`.
 
 ## If it does not start
 
