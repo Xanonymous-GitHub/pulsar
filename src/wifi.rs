@@ -274,6 +274,7 @@ fn supervise(wifi: &mut BlockingWifi<EspWifi<'static>>, status: &SharedStatus) {
         match join(wifi) {
             Ok(()) => {
                 failures = 0;
+                status.update(|status| status.connections = status.connections.wrapping_add(1));
                 monitor(wifi, status);
                 log::warn!("connection lost");
             }

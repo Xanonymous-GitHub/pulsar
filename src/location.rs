@@ -41,12 +41,12 @@ use serde::Deserialize;
 
 use crate::config::{
     LOCATION_FALLBACK_LATITUDE, LOCATION_FALLBACK_LONGITUDE, LOCATION_FALLBACK_PLACE,
-    LOCATION_MIN_INTERVAL, LOCATION_REFRESH, LOCATION_RETRY, LOCATION_SOURCE, LOCATION_TIMEOUT,
-    LocationSource,
+    LOCATION_GEOJS_URL, LOCATION_IPWHOIS_URL, LOCATION_MIN_INTERVAL, LOCATION_PLACE_MAX_CHARS,
+    LOCATION_REFRESH, LOCATION_RETRY, LOCATION_SOURCE, LOCATION_TIMEOUT, LocationSource,
 };
 use crate::http::{self, Client};
 
-pub use place::{Coordinates, MAX_PLACE_CHARS, ascii_place};
+pub use place::{Coordinates, ascii_place};
 
 /// What can go wrong when asking one location service.
 #[derive(Debug, thiserror::Error)]
@@ -65,10 +65,15 @@ pub enum Error {
     Unknown,
 }
 
+/// A name as the screen can show it, see [`ascii_place`].
+fn place_name(name: &str) -> Option<String> {
+    ascii_place(name, LOCATION_PLACE_MAX_CHARS)
+}
+
 /// A place on the globe with a name for the screen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Location {
-    /// The name of the place: ASCII, at most [`MAX_PLACE_CHARS`] characters.
+    /// The name of the place: ASCII, at most [`LOCATION_PLACE_MAX_CHARS`] characters.
     pub place: String,
     /// Where it is.
     pub coordinates: Coordinates,
@@ -85,8 +90,8 @@ impl Location {
     ) -> Result<Self, Error> {
         let coordinates = Coordinates::new(latitude, longitude).ok_or(Error::Unknown)?;
         let place = city
-            .and_then(ascii_place)
-            .or_else(|| country.and_then(ascii_place))
+            .and_then(place_name)
+            .or_else(|| country.and_then(place_name))
             .ok_or(Error::Unknown)?;
         Ok(Self { place, coordinates })
     }
@@ -94,7 +99,7 @@ impl Location {
     /// The place in the configuration, or `None` if the coordinates there are not on the globe.
     fn configured() -> Option<Self> {
         Some(Self {
-            place: ascii_place(LOCATION_FALLBACK_PLACE)?,
+            place: place_name(LOCATION_FALLBACK_PLACE)?,
             coordinates: Coordinates::new(LOCATION_FALLBACK_LATITUDE, LOCATION_FALLBACK_LONGITUDE)?,
         })
     }
@@ -110,17 +115,18 @@ struct Provider {
     parse: fn(&[u8]) -> Result<Location, Error>,
 }
 
-/// The services, in the order they are tried. Both are free without a key for this kind of use,
-/// answer in a few hundred bytes, and speak TLS 1.3.
+/// The services, in the order they are tried: the address of each is in
+/// [`config`](crate::config), and how to read its answer is here. Both are free without a key for
+/// this kind of use, answer in a few hundred bytes, and speak TLS 1.3.
 const PROVIDERS: [Provider; 2] = [
     Provider {
         name: "ipwho.is",
-        url: "https://ipwho.is/?fields=success,city,country_code,latitude,longitude",
+        url: LOCATION_IPWHOIS_URL,
         parse: parse_ipwhois,
     },
     Provider {
         name: "get.geojs.io",
-        url: "https://get.geojs.io/v1/ip/geo.json",
+        url: LOCATION_GEOJS_URL,
         parse: parse_geojs,
     },
 ];

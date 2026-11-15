@@ -102,6 +102,18 @@ pub const LOCATION_FALLBACK_LATITUDE: f64 = 25.05;
 /// Degrees east of [`LOCATION_FALLBACK_PLACE`] (negative: west).
 pub const LOCATION_FALLBACK_LONGITUDE: f64 = 121.53;
 
+/// The first location service asked: `ipwho.is`, with only the fields that are used. A `GET`
+/// answers with where the address of the request is. `src/location.rs` reads the answer.
+pub const LOCATION_IPWHOIS_URL: &str =
+    "https://ipwho.is/?fields=success,city,country_code,latitude,longitude";
+
+/// The location service asked when the first one fails: `get.geojs.io`.
+pub const LOCATION_GEOJS_URL: &str = "https://get.geojs.io/v1/ip/geo.json";
+
+/// The longest place name kept from a location service, in characters. The name scrolls with the
+/// weather text, and a service must not be able to fill the screen with it.
+pub const LOCATION_PLACE_MAX_CHARS: usize = 24;
+
 /// How long a location from the network is used before the service is asked again. A new Wi-Fi
 /// connection asks at once, because it may be another network in another place.
 pub const LOCATION_REFRESH: Duration = Duration::from_hours(24);

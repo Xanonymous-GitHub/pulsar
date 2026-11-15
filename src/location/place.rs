@@ -6,10 +6,6 @@
 //! rustc --edition 2024 --test src/location/place.rs -o /tmp/t && /tmp/t
 //! ```
 
-/// The longest place name kept, in characters. The name scrolls with the weather text, and a
-/// service must not be able to fill the screen with it.
-pub const MAX_PLACE_CHARS: usize = 24;
-
 /// A point on the globe, rounded to a hundredth of a degree (about one kilometre).
 ///
 /// The address of a network only tells the city, so more digits would be false precision, and
@@ -75,14 +71,17 @@ fn degrees(centi: i16) -> String {
 }
 
 /// Turns a place name from a service into text the display font can show: ASCII only, at most
-/// [`MAX_PLACE_CHARS`] characters, no control characters. Common accented Latin letters lose
-/// their accent (`São Paulo` becomes `Sao Paulo`); anything else outside ASCII becomes `?`.
-/// Returns `None` when nothing readable is left.
+/// `max_chars` characters, no control characters. Common accented Latin letters lose their accent
+/// (`São Paulo` becomes `Sao Paulo`); anything else outside ASCII becomes `?`. Returns `None`
+/// when nothing readable is left.
+///
+/// The limit is there because the name scrolls with the weather text, and a service must not be
+/// able to fill the screen with it.
 #[must_use]
-pub fn ascii_place(name: &str) -> Option<String> {
+pub fn ascii_place(name: &str, max_chars: usize) -> Option<String> {
     let mut place = String::new();
     for character in name.trim().chars() {
-        if place.chars().count() >= MAX_PLACE_CHARS {
+        if place.chars().count() >= max_chars {
             break;
         }
         match character {
@@ -95,7 +94,7 @@ pub fn ascii_place(name: &str) -> Option<String> {
     let readable = place
         .chars()
         .any(|character| character.is_ascii_alphanumeric());
-    readable.then(|| place.chars().take(MAX_PLACE_CHARS).collect())
+    readable.then(|| place.chars().take(max_chars).collect())
 }
 
 /// The ASCII spelling of an accented Latin letter, if it has an obvious one.
@@ -146,6 +145,13 @@ const fn fold(character: char) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    /// The limit used in these tests.
+    const LIMIT: usize = 24;
+
+    fn place(name: &str) -> Option<String> {
+        ascii_place(name, LIMIT)
+    }
+
     fn text(latitude: f64, longitude: f64) -> Option<(String, String)> {
         Coordinates::new(latitude, longitude).map(|place| (place.latitude(), place.longitude()))
     }
@@ -190,37 +196,34 @@ mod tests {
 
     #[test]
     fn plain_names_pass() {
-        assert_eq!(ascii_place("Taipei").as_deref(), Some("Taipei"));
-        assert_eq!(ascii_place("  New York  ").as_deref(), Some("New York"));
-        assert_eq!(ascii_place("Saint-Denis").as_deref(), Some("Saint-Denis"));
+        assert_eq!(place("Taipei").as_deref(), Some("Taipei"));
+        assert_eq!(place("  New York  ").as_deref(), Some("New York"));
+        assert_eq!(place("Saint-Denis").as_deref(), Some("Saint-Denis"));
     }
 
     #[test]
     fn accents_are_folded() {
-        assert_eq!(ascii_place("São Paulo").as_deref(), Some("Sao Paulo"));
-        assert_eq!(ascii_place("Zürich").as_deref(), Some("Zurich"));
-        assert_eq!(ascii_place("Kraków").as_deref(), Some("Krakow"));
-        assert_eq!(ascii_place("Besançon").as_deref(), Some("Besancon"));
-        assert_eq!(ascii_place("Straße").as_deref(), Some("Strasse"));
+        assert_eq!(place("São Paulo").as_deref(), Some("Sao Paulo"));
+        assert_eq!(place("Zürich").as_deref(), Some("Zurich"));
+        assert_eq!(place("Kraków").as_deref(), Some("Krakow"));
+        assert_eq!(place("Besançon").as_deref(), Some("Besancon"));
+        assert_eq!(place("Straße").as_deref(), Some("Strasse"));
     }
 
     #[test]
     fn other_scripts_become_question_marks_or_nothing() {
-        assert_eq!(ascii_place("台北 Taipei").as_deref(), Some("?? Taipei"));
-        assert_eq!(ascii_place("台北"), None);
-        assert_eq!(ascii_place(""), None);
-        assert_eq!(ascii_place("   "), None);
-        assert_eq!(ascii_place("?-?"), None);
+        assert_eq!(place("台北 Taipei").as_deref(), Some("?? Taipei"));
+        assert_eq!(place("台北"), None);
+        assert_eq!(place(""), None);
+        assert_eq!(place("   "), None);
+        assert_eq!(place("?-?"), None);
     }
 
     #[test]
     fn control_characters_are_dropped_and_long_names_cut() {
-        assert_eq!(ascii_place("Tai\npei\u{7}").as_deref(), Some("Taipei"));
-        let long = ascii_place(&"Llanfairpwllgwyngyll".repeat(3));
+        assert_eq!(place("Tai\npei\u{7}").as_deref(), Some("Taipei"));
+        let long = place(&"Llanfairpwllgwyngyll".repeat(3));
         assert_eq!(long.as_deref(), Some("LlanfairpwllgwyngyllLlan"));
-        assert_eq!(
-            ascii_place(&"ß".repeat(40)).map(|place| place.len()),
-            Some(MAX_PLACE_CHARS)
-        );
+        assert_eq!(place(&"ß".repeat(40)).map(|place| place.len()), Some(LIMIT));
     }
 }

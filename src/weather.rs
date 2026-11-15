@@ -226,17 +226,21 @@ fn run(status: &SharedStatus, message: &SharedMessage) {
     let mut latest: Option<Latest> = None;
     let mut failures: u32 = 0;
     let mut next_attempt = Instant::now();
-    let mut was_online = false;
+    // The last connection (see `WifiStatus::connections`) that the clock and the place were
+    // brought up to date for.
+    let mut seen_connection = 0;
 
     loop {
-        let online = status.snapshot().is_online();
-        if online && !was_online {
-            // The network is up: ask for the time now, and for the place again, because this
-            // may be another network.
+        let wifi = status.snapshot();
+        let online = wifi.is_online();
+        if online && wifi.connections != seen_connection {
+            // The network is up, on a connection that is new to this thread (it may have come
+            // while a request was waiting): ask for the time now, and for the place again,
+            // because this may be another network.
+            seen_connection = wifi.connections;
             clock::resync();
             locator.invalidate();
         }
-        was_online = online;
 
         if online {
             // A new place needs its own forecast now, not at the next refresh.
