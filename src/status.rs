@@ -59,6 +59,10 @@ pub struct WifiStatus {
     pub band: Option<Band>,
     /// The address from DHCP, once there is one.
     pub ip: Option<Ipv4Addr>,
+    /// How many times the board has joined the network since it started. A reader that
+    /// remembers the last value it saw notices every new connection, also one that came and
+    /// went while the reader was busy.
+    pub connections: u32,
 }
 
 impl WifiStatus {

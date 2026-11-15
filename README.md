@@ -5,7 +5,8 @@ Pulsar is firmware for the Seeed XIAO ESP32-C5 on the Seeeduino XIAO Expansion B
 What it does:
 
 - Joins a **WPA3-Personal** Wi-Fi network on **2.4 GHz or 5 GHz** (Wi-Fi 6 is allowed on both bands). It prefers 5 GHz when that signal is within 10 dB of the best 2.4 GHz one (`WIFI_PREFER_5GHZ_MARGIN_DB` in `src/config.rs`), and uses 2.4 GHz otherwise. The device name on the network is `pulsar`.
-- Shows the SSID, a 5 GHz / 2.4 GHz badge and a 5-level signal icon on the first line of the 0.96" OLED, the local time (Asia/Taipei, from SNTP) on the second, and the Taipei weather forecast scrolling under them. The forecast comes over HTTPS from Open-Meteo every 15 minutes, so a report on the screen shows that Wi-Fi, DNS, TLS 1.3, the certificate chain and the clock all work. Without internet the last report stays, marked `(old)` after 35 minutes, and updates are retried with a growing delay until the connection is back.
+- Shows the SSID, a 5 GHz / 2.4 GHz badge and a 5-level signal icon on the first line of the 0.96" OLED, the local time (from SNTP) on the second, and the weather forecast scrolling under them. The forecast comes over HTTPS from Open-Meteo every 15 minutes, so a report on the screen shows that Wi-Fi, DNS, TLS 1.3, the certificate chain and the clock all work. Without internet the last report stays, marked `(old)` after 35 minutes, and updates are retried with a growing delay until the connection is back.
+- Finds out **where it is** from the network: a location service tells the city of the board's public address, the forecast is asked for that place, and the forecast in turn tells the time zone (daylight saving time included), so the clock is right wherever the board is plugged in. See [Location and time zone](#location-and-time-zone).
 - Has a general HTTP/HTTPS client (`src/http.rs`): HTTP/1.1 with TLS 1.3 (TLS 1.2 as a fallback), the Mozilla root certificates and certificate date checks. HTTP/2 and HTTP/3 are not available in ESP-IDF.
 - Speaks **Bluetooth LE 5** (NimBLE): a phone pairs with a six-digit passkey shown on the OLED (LE Secure Connections only), and a paired phone can read and subscribe to the Wi-Fi status and the weather text. The board also advertises on the LE Coded PHY for long range, listens with extended scanning, and keeps the bonds in the encrypted secret store. A Bluetooth icon at the right of the second status line shows the state: filled = a phone is connected, hollow = none, steady = paired, blinking = not paired yet. The chip's features and which ones are on are listed in [docs/bluetooth.md](docs/bluetooth.md).
 - Speaks **MQTT 5 and 3.1.1** over TCP, TLS, WebSocket and secure WebSocket (`src/mqtt/`), with a username and password kept in the secret store. It publishes its availability (with a Last Will), a JSON state every minute and takes a few commands (`ping`, `notice` for the screen, `restart`). It announces itself to **Home Assistant** by MQTT discovery. Set `PULSAR_MQTT_URL` to turn it on; see [docs/mqtt.md](docs/mqtt.md).
@@ -52,6 +53,16 @@ cargo run --features insecure-dev-store
 
 They are stored on the chip like the Wi-Fi credentials, so later builds can leave them unset. The board then publishes under `pulsar/<id>/` (`<id>` is the end of its MAC address; the log shows it) and appears in Home Assistant as a device. Topics, commands, what is and is not supported, and security advice are in [docs/mqtt.md](docs/mqtt.md).
 
+## Location and time zone
+
+After every Wi-Fi connection (but at most every five minutes), and then once a day, the board asks a location service which city its public address is in (`src/location.rs`): first `ipwho.is`, then `get.geojs.io` if that fails. The weather forecast is then asked for those coordinates, rounded to a hundredth of a degree (about one kilometre). Open-Meteo also reports the time zone of the place as an offset from UTC that is valid now, and the clock uses it. It is refreshed with every forecast, so a change to or from daylight saving time shows within 15 minutes, without a time zone database on the board.
+
+What leaves the board for this: one HTTPS request to the location service, which sees the public address it comes from (as every server does) and nothing else, and the rounded coordinates in the request to Open-Meteo. The location is kept in RAM only.
+
+Until a service has answered, and when none does, the place in `src/config.rs` is used (`LOCATION_FALLBACK_PLACE`, `LOCATION_FALLBACK_LATITUDE`, `LOCATION_FALLBACK_LONGITUDE`), and the clock shows `DEFAULT_UTC_OFFSET_SECONDS` until the first forecast arrives.
+
+An address tells the city at best, and sometimes the wrong one (a VPN, a mobile provider, some cable providers). To pin the place, set `LOCATION_SOURCE` to `LocationSource::Fixed` in `src/config.rs` and put your place in the `LOCATION_FALLBACK_*` constants. The board then asks no location service; the time zone still comes from the forecast.
+
 ## Pairing a phone
 
 1. Open a BLE app such as nRF Connect and connect to `pulsar`. The board starts advertising once Wi-Fi has finished its first connection attempt, about 16 seconds after boot (up to 60 seconds if Wi-Fi is slow). The Bluetooth icon appears when it does.
@@ -95,10 +106,11 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/secrets.rs` | The encrypted secret store on top of NVS. |
 | `src/status.rs` | The Wi-Fi and Bluetooth status shared between the radio code and the screen. |
 | `src/bluetooth/` | Bluetooth LE: stack set-up and pairing (`mod.rs`), advertising sets, GATT services, bonds in the secret store, scanning. |
-| `src/clock.rs` | SNTP and the local time of day. |
+| `src/clock.rs` | SNTP, the offset of the local time zone, and the local time of day (`clock/local_time.rs`). |
+| `src/location.rs` | The city the board's network is in, from a location service (`location/place.rs` checks coordinates and names). |
 | `src/http.rs` | The HTTP/HTTPS client. |
 | `src/handshake.rs` | Lets one TLS handshake run at a time: two do not fit in the heap. |
-| `src/weather.rs` | Fetches the forecast and turns it into the scrolling text. |
+| `src/weather.rs` | Fetches the forecast for the location, turns it into the scrolling text and sets the time zone. |
 | `src/message.rs` | The scrolling text shared between the weather thread and the screen, with timed notices. |
 | `src/mqtt/` | The MQTT client (`mod.rs`, `client.rs`), the broker settings in the secret store, topic matching and the hand-over from the MQTT task. |
 | `src/telemetry.rs` | What the board does over MQTT: availability, state, commands. |
