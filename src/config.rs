@@ -115,6 +115,12 @@ pub const HTTP_MAX_BODY_BYTES: usize = 64 * 1024;
 /// be checked while the clock still shows 1970.
 pub const HTTP_CLOCK_WAIT: Duration = Duration::from_secs(30);
 
+/// How long a new TLS connection (an HTTPS request, the MQTT client) waits for another one that
+/// is being set up at that moment, before it goes ahead anyway. Two TLS handshakes at once do not
+/// fit in the heap, see `handshake`. It is a little more than the longest a handshake may take
+/// ([`HTTP_TIMEOUT`]).
+pub const TLS_HANDSHAKE_PATIENCE: Duration = Duration::from_secs(20);
+
 /// Name of the secret that holds the Bluetooth bonds (the keys of the paired phones).
 pub const BLE_BONDS_SECRET_KEY: &str = "ble-bonds";
 
@@ -191,6 +197,10 @@ pub const MQTT_RECONNECT: Duration = Duration::from_secs(10);
 /// How long the broker connection (connect, TLS handshake, send, receive) may wait for network
 /// data before it fails.
 pub const MQTT_NETWORK_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The longest the MQTT client waits, after it has connected, for its first messages to leave
+/// before it lets another TLS connection be set up (see `handshake`).
+pub const MQTT_CONNECT_SETTLE: Duration = Duration::from_secs(5);
 
 /// MQTT 5, only for a kept session (`mqtt::Options::persistent_session`): how long the broker keeps
 /// the session after a disconnect. It must be at least [`MQTT_WILL_DELAY`], or the Last Will goes
