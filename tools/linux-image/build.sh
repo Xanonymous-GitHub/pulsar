@@ -9,7 +9,8 @@
 #
 # What is built is in this directory: versions.env (the kernel and Buildroot versions),
 # configs/pulsar_defconfig (Buildroot), board/pulsar/ (the kernel configuration, the BusyBox
-# changes and the files of /etc). Everything comes from buildroot.org and kernel.org: no patches.
+# changes and the files of /etc). Everything comes from buildroot.org and kernel.org, without
+# patches; external.mk holds the one adjustment to a Buildroot package.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
