@@ -8,3 +8,6 @@ secrets,   data, nvs,      0xf000,  0x4000,
 nvs_keys,  data, nvs_keys, 0x13000, 0x1000, encrypted
 phy_init,  data, phy,      0x14000, 0x1000,
 factory,   app,  factory,  0x20000, 3M,
+# 'linux' holds the kernel image for the Linux guest (src/linux/, docs/linux.md). It is a raw
+#   image, written with `espflash write-bin 0x320000 <Image>`; the firmware only reads it.
+linux,     data, undefined, 0x320000, 0x4E0000,

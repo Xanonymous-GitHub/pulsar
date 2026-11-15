@@ -9,6 +9,7 @@ What it does:
 - Has a general HTTP/HTTPS client (`src/http.rs`): HTTP/1.1 with TLS 1.3 (TLS 1.2 as a fallback), the Mozilla root certificates and certificate date checks. HTTP/2 and HTTP/3 are not available in ESP-IDF.
 - Speaks **Bluetooth LE 5** (NimBLE): a phone pairs with a six-digit passkey shown on the OLED (LE Secure Connections only), and a paired phone can read and subscribe to the Wi-Fi status and the weather text. The board also advertises on the LE Coded PHY for long range, listens with extended scanning, and keeps the bonds in the encrypted secret store. A Bluetooth icon at the right of the second status line shows the state: filled = a phone is connected, hollow = none, steady = paired, blinking = not paired yet. The chip's features and which ones are on are listed in [docs/bluetooth.md](docs/bluetooth.md).
 - Speaks **MQTT 5 and 3.1.1** over TCP, TLS, WebSocket and secure WebSocket (`src/mqtt/`), with a username and password kept in the secret store. It publishes its availability (with a Last Will), a JSON state every minute and takes a few commands (`ping`, `notice` for the screen, `restart`). It announces itself to **Home Assistant** by MQTT discovery. Set `PULSAR_MQTT_URL` to turn it on; see [docs/mqtt.md](docs/mqtt.md).
+- Can **run Linux**: with the `linux` feature the firmware boots a Linux 7.3 kernel in an emulated RISC-V computer whose RAM is the board's PSRAM, and gives you a root shell on the USB port. See [docs/linux.md](docs/linux.md).
 - Blinks the user LED.
 - Keeps the Wi-Fi password in an encrypted NVS partition. See [docs/secure-wifi-secrets.md](docs/secure-wifi-secrets.md).
 
@@ -105,8 +106,13 @@ This is a false alarm for this tier-3 target. `cargo build` is the source of tru
 | `src/home_assistant.rs` | The Home Assistant discovery message. |
 | `src/ui/` | The screen: status bar (Wi-Fi, clock, Bluetooth icon) and scrolling text. |
 | `src/led.rs` | The blinking LED. |
+| `src/linux/` | Linux on the board: an emulated RV32IMA processor (`cpu.rs`), its devices (`machine.rs`), the device tree (`fdt.rs`) and the thread that runs the guest (`guest.rs`). |
 | `src/platform.rs` | The few ESP-IDF calls that need `unsafe`. |
 | `tools/mqtt-check.sh` | Checks a running board through its MQTT broker, see [docs/mqtt.md](docs/mqtt.md). |
-| `partitions.csv` | Flash layout, including the `secrets` and `nvs_keys` partitions. |
+| `tools/linux-image/` | Builds the Linux kernel image with Buildroot. |
+| `tools/linux-host.rs` | Boots a kernel image in the same emulator on a desktop computer. |
+| `tools/host-tests.sh` | Runs the unit tests that work on the host. |
+| `partitions.csv` | Flash layout, including the `secrets` and `nvs_keys` partitions and the `linux` partition for the kernel image. |
 | `sdkconfig.defaults` | ESP-IDF settings for development. |
+| `sdkconfig.defaults.linux` | PSRAM and console settings for a build with the `linux` feature. |
 | `sdkconfig.defaults.secure` | Flash encryption overlay. Applied only by you. |

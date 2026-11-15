@@ -292,3 +292,31 @@ pub const RESTART_CONFIRM_WAIT: Duration = Duration::from_secs(10);
 
 /// The topic prefix Home Assistant listens to for discovery messages (its default).
 pub const HA_DISCOVERY_PREFIX: &str = "homeassistant";
+
+/// The name of the flash partition that holds the Linux kernel image (see `partitions.csv` and
+/// `docs/linux.md`).
+pub const LINUX_PARTITION: &core::ffi::CStr = c"linux";
+
+/// Stack size of the thread that runs the Linux guest, in bytes.
+pub const LINUX_STACK_BYTES: usize = 8 * 1024;
+
+/// `FreeRTOS` priority of the thread that runs the Linux guest. The other threads of the firmware
+/// have 5 and the idle task has 0, so the guest gets the time nothing else wants.
+pub const LINUX_THREAD_PRIORITY: u8 = 1;
+
+/// How many instructions the guest runs before the firmware looks at the time and at the
+/// console again. The guest's timer is only this exact, so keep it at a millisecond or so.
+pub const LINUX_BATCH_INSTRUCTIONS: u32 = 4096;
+
+/// How often the host's key presses are fetched for the guest.
+pub const LINUX_CONSOLE_POLL: Duration = Duration::from_millis(10);
+
+/// While the guest is busy, its thread pauses this often ...
+pub const LINUX_BREATHER_EVERY: Duration = Duration::from_millis(100);
+
+/// ... for this long, so the idle task below it can feed the watchdog.
+pub const LINUX_BREATHER: Duration = Duration::from_millis(1);
+
+/// The longest sleep of the guest's thread while the guest is idle. A key press waits at most
+/// this long.
+pub const LINUX_IDLE_SLEEP_MAX: Duration = Duration::from_millis(10);

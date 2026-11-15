@@ -113,6 +113,12 @@ fn main() -> Result<()> {
         bluetooth_status.update(|status| status.state = BtState::Failed);
     }
 
+    // Last, so that the other threads exist before the guest takes the time that is left.
+    #[cfg(feature = "linux")]
+    if let Err(error) = pulsar::linux::spawn() {
+        log::error!("Linux not started: {error}");
+    }
+
     log::info!("pulsar started");
     Ok(())
 }

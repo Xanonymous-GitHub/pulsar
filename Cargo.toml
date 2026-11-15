@@ -14,6 +14,9 @@ harness = false # no built-in test harness on the device
 # Lets the secret store work WITHOUT flash/NVS encryption (secrets end up in plain text, with a loud
 # warning at boot). For testing before encryption is enabled. Never use it for real secrets.
 insecure-dev-store = []
+# Runs Linux in an emulated RISC-V computer (src/linux/, docs/linux.md). It needs the PSRAM
+# settings in sdkconfig.defaults.linux and a kernel image in the `linux` flash partition.
+linux = []
 
 [dependencies]
 anyhow            = "1.0.104"
@@ -40,6 +43,10 @@ embuild = "0.33.7"
 [[package.metadata.esp-idf-sys.extra_components]]
 remote_component = { name = "espressif/mqtt", version = "1.1" }
 
+# ESP-IDF headers that `esp-idf-sys` does not make bindings for by itself.
+[[package.metadata.esp-idf-sys.extra_components]]
+bindings_header = "bindings.h"
+
 [patch.crates-io]
 # esp32-nimble 0.13.0 plus two fixes (a remotely triggerable `todo!()` panic and a data race on
 # the subscriber list), see vendor/esp32-nimble/PATCHES.md.
@@ -48,6 +55,8 @@ esp32-nimble = { path = "vendor/esp32-nimble" }
 [lints.rust]
 unsafe_code = "deny"
 missing_docs = "warn"
+# Set by the build script from the ESP-IDF configuration (see the end of src/lib.rs).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(esp_idf_spiram_use_memmap)"] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

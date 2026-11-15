@@ -8,6 +8,8 @@
     reason = "FFI calls into ESP-IDF; see the SAFETY comment on each"
 )]
 
+#[cfg(feature = "linux")]
+use core::ffi::CStr;
 use core::ffi::{c_int, c_void};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -473,4 +475,182 @@ pub fn ble_bonds_watch() {
 #[must_use]
 pub fn ble_bonds_take_changed() -> bool {
     BONDS_CHANGED.swap(false, Ordering::AcqRel)
+}
+
+/// Hands out the board's PSRAM, all of it, as one block of bytes. It can be taken once: later
+/// calls return `None`, as does a board without PSRAM.
+///
+/// This needs `CONFIG_SPIRAM_USE_MEMMAP`: the PSRAM is mapped into the address space but given
+/// to no allocator, so nothing else in the firmware uses it.
+#[cfg(feature = "linux")]
+#[must_use]
+pub fn psram_take() -> Option<&'static mut [u8]> {
+    static TAKEN: AtomicBool = AtomicBool::new(false);
+
+    // SAFETY: both functions take no arguments, have no preconditions and only read the state
+    // that the PSRAM driver set up before `main` ran.
+    let size = unsafe {
+        if !sys::esp_psram_is_initialized() {
+            return None;
+        }
+        sys::esp_psram_get_size()
+    };
+    if size == 0 {
+        return None;
+    }
+
+    // Where the first byte of the PSRAM is mapped, and whether the mapping goes on without a
+    // gap to its last byte.
+    let mut start: *mut c_void = core::ptr::null_mut();
+    let mut last_offset: sys::esp_paddr_t = 0;
+    let mut last_target: sys::mmu_target_t = 0;
+    // SAFETY: the calls only read the MMU tables. Each pointer argument points to a local of
+    // the type the function writes, valid for the duration of the call. The address passed to
+    // the second call is not dereferenced by it.
+    let contiguous = unsafe {
+        sys::esp!(sys::esp_mmu_paddr_to_vaddr(
+            0,
+            sys::mmu_target_t_MMU_TARGET_PSRAM0,
+            sys::mmu_vaddr_t_MMU_VADDR_DATA,
+            &raw mut start,
+        ))
+        .is_ok()
+            && sys::esp!(sys::esp_mmu_vaddr_to_paddr(
+                start.cast::<u8>().wrapping_add(size - 1).cast(),
+                &raw mut last_offset,
+                &raw mut last_target,
+            ))
+            .is_ok()
+    };
+    let whole = contiguous
+        && last_target == sys::mmu_target_t_MMU_TARGET_PSRAM0
+        && usize::try_from(last_offset) == Ok(size - 1);
+    if start.is_null() || !whole || TAKEN.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+
+    // SAFETY: `start` is the mapped address of PSRAM offset 0, and the check above showed that
+    // the `size` bytes from there are mapped to the PSRAM in order. The mapping is made at boot
+    // and never removed. With `CONFIG_SPIRAM_USE_MEMMAP` (enforced in `src/lib.rs`) ESP-IDF gives
+    // this memory to no allocator and puts nothing of its own there, and `TAKEN` makes this the
+    // only reference ever created to it. Any bit pattern is a valid `u8`.
+    Some(unsafe { core::slice::from_raw_parts_mut(start.cast::<u8>(), size) })
+}
+
+/// A data partition of the flash, found by its name in the partition table.
+#[cfg(feature = "linux")]
+#[derive(Clone, Copy, Debug)]
+pub struct Partition(&'static sys::esp_partition_t);
+
+#[cfg(feature = "linux")]
+impl Partition {
+    /// Looks for the data partition called `label`.
+    #[must_use]
+    pub fn find(label: &CStr) -> Option<Self> {
+        // SAFETY: `label` is a valid C string for the duration of the call, which only reads the
+        // partition table. The result is null or points to an entry that ESP-IDF keeps, unchanged,
+        // for as long as the program runs.
+        unsafe {
+            sys::esp_partition_find_first(
+                sys::esp_partition_type_t_ESP_PARTITION_TYPE_DATA,
+                sys::esp_partition_subtype_t_ESP_PARTITION_SUBTYPE_ANY,
+                label.as_ptr(),
+            )
+            .as_ref()
+        }
+        .map(Self)
+    }
+
+    /// The size of the partition in bytes.
+    #[must_use]
+    pub fn size(self) -> usize {
+        usize::try_from(self.0.size).unwrap_or(usize::MAX)
+    }
+
+    /// Reads `buffer.len()` bytes that start `offset` bytes into the partition. The buffer must
+    /// be in internal RAM (not PSRAM).
+    ///
+    /// # Errors
+    ///
+    /// Fails if the range is not inside the partition or the flash cannot be read.
+    pub fn read(self, offset: usize, buffer: &mut [u8]) -> Result<(), sys::EspError> {
+        // SAFETY: the partition entry is valid (see `find`), and the function writes exactly
+        // `buffer.len()` bytes to `buffer`, which is valid for writes of that length. It checks
+        // the range against the partition itself.
+        sys::esp!(unsafe {
+            sys::esp_partition_read(self.0, offset, buffer.as_mut_ptr().cast(), buffer.len())
+        })
+    }
+}
+
+/// How long [`console_write`] waits for room in the USB transmit buffer, in ticks (milliseconds).
+/// Without a host that reads, the data is dropped after this.
+#[cfg(feature = "linux")]
+const CONSOLE_WRITE_WAIT_TICKS: u32 = 20;
+
+/// Takes over the USB serial port for [`console_read`] and [`console_write`]: installs the
+/// interrupt-driven driver and makes the standard output (the log) use it too, so both can share
+/// the port. Call it once.
+///
+/// # Errors
+///
+/// Fails if the driver cannot be installed.
+#[cfg(feature = "linux")]
+pub fn console_claim() -> Result<(), sys::EspError> {
+    let mut config = sys::usb_serial_jtag_driver_config_t {
+        tx_buffer_size: 2048,
+        rx_buffer_size: 256,
+    };
+    // SAFETY: `config` is a valid, initialised struct that outlives the call, which copies what
+    // it needs. Installing is checked first, because a second install would fail. The second
+    // call only switches which functions the standard streams use.
+    unsafe {
+        if !sys::usb_serial_jtag_is_driver_installed() {
+            sys::esp!(sys::usb_serial_jtag_driver_install(&raw mut config))?;
+        }
+        sys::usb_serial_jtag_vfs_use_driver();
+    }
+    Ok(())
+}
+
+/// Reads the bytes the host has sent over the USB serial port into `buffer`, without waiting.
+/// Returns how many there were. Call [`console_claim`] first.
+#[cfg(feature = "linux")]
+#[must_use]
+pub fn console_read(buffer: &mut [u8]) -> usize {
+    let Ok(length) = u32::try_from(buffer.len()) else {
+        return 0;
+    };
+    if length == 0 {
+        return 0;
+    }
+    // SAFETY: the driver is installed (see `console_claim`). The function writes at most
+    // `length` bytes to `buffer`, which is valid for writes of that length, and with a wait of
+    // zero ticks it returns at once.
+    let read = unsafe { sys::usb_serial_jtag_read_bytes(buffer.as_mut_ptr().cast(), length, 0) };
+    usize::try_from(read).unwrap_or(0)
+}
+
+/// Sends `bytes` to the host over the USB serial port, exactly as they are. If the host does
+/// not read, what does not fit in the buffer is dropped after a short wait. Call
+/// [`console_claim`] first.
+#[cfg(feature = "linux")]
+pub fn console_write(bytes: &[u8]) {
+    // SAFETY: the driver is installed (see `console_claim`). The function reads `bytes.len()`
+    // bytes from `bytes`, which is valid for reads of that length, and copies them.
+    unsafe {
+        sys::usb_serial_jtag_write_bytes(
+            bytes.as_ptr().cast(),
+            bytes.len(),
+            CONSOLE_WRITE_WAIT_TICKS,
+        );
+    }
+}
+
+/// Makes ESP-IDF's own components (Wi-Fi, the network stack, ...) log warnings and errors only.
+#[cfg(feature = "linux")]
+pub fn quiet_system_log() {
+    // SAFETY: the tag is a valid C string (the wildcard for every component) for the duration
+    // of the call, which only changes log filters.
+    unsafe { sys::esp_log_level_set(c"*".as_ptr(), sys::esp_log_level_t_ESP_LOG_WARN) };
 }
