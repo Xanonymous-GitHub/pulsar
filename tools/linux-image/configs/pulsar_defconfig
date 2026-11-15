@@ -1,0 +1,42 @@
+# Buildroot configuration of the Linux guest (see ../build.sh).
+
+# The processor of src/linux/cpu.rs: RV32IMA, no compressed instructions, no floating point,
+# no MMU. Without an MMU Buildroot makes static "flat" binaries with uClibc-ng.
+BR2_riscv=y
+BR2_riscv_custom=y
+BR2_RISCV_ISA_RVM=y
+BR2_RISCV_ISA_RVA=y
+# BR2_RISCV_ISA_RVF is not set
+# BR2_RISCV_ISA_RVD is not set
+# BR2_RISCV_ISA_RVC is not set
+BR2_RISCV_32=y
+# BR2_RISCV_USE_MMU is not set
+BR2_RISCV_ABI_ILP32=y
+BR2_OPTIMIZE_S=y
+
+# The C library is built against the headers of a long-term kernel, so the kernel version below
+# can change without rebuilding the toolchain. The kernel must not be older than these headers.
+BR2_KERNEL_HEADERS_6_18=y
+
+BR2_TARGET_GENERIC_HOSTNAME="pulsar"
+BR2_TARGET_GENERIC_ISSUE="Welcome to Linux on pulsar"
+# The console is started by our own /etc/inittab.
+# BR2_TARGET_GENERIC_GETTY is not set
+BR2_SYSTEM_DHCP=""
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_PULSAR_PATH)/board/pulsar/overlay"
+
+# The kernel. build.sh puts the version from versions.env here.
+BR2_LINUX_KERNEL=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION=y
+BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="@LINUX_VERSION@"
+BR2_LINUX_KERNEL_USE_CUSTOM_CONFIG=y
+BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="$(BR2_EXTERNAL_PULSAR_PATH)/board/pulsar/linux.config"
+BR2_LINUX_KERNEL_IMAGE=y
+
+# BusyBox: Buildroot's configuration for machines without MMU, made smaller.
+BR2_PACKAGE_BUSYBOX_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_PULSAR_PATH)/board/pulsar/busybox.fragment"
+
+# The root file system goes inside the kernel image: one file to flash, and no disk to emulate.
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_INITRAMFS=y
+# BR2_TARGET_ROOTFS_TAR is not set

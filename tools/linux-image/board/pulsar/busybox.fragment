@@ -1,0 +1,149 @@
+# Applied on top of Buildroot's busybox-minimal.config (its configuration for machines without
+# MMU): a smaller BusyBox for a serial console on a machine with 8 MiB, no network and no disk.
+#
+# Size matters twice here. A no-MMU kernel loads every running program whole into one contiguous
+# block of RAM, rounded up to a power of two. And the shell runs the small applets inside its
+# own process ("nofork") instead of loading BusyBox once more for each command.
+CONFIG_FEATURE_PREFER_APPLETS=y
+CONFIG_FEATURE_SH_STANDALONE=y
+CONFIG_FEATURE_SH_NOFORK=y
+
+# Added: a look at the machine.
+CONFIG_FREE=y
+CONFIG_UPTIME=y
+
+# Archives, checksums, text tools
+# CONFIG_ZCAT is not set
+# CONFIG_BZCAT is not set
+# CONFIG_LZCAT is not set
+# CONFIG_XZCAT is not set
+# CONFIG_UNLZOP is not set
+# CONFIG_LZOPCAT is not set
+# CONFIG_CKSUM is not set
+# CONFIG_CRC32 is not set
+# CONFIG_MD5SUM is not set
+# CONFIG_SHA1SUM is not set
+# CONFIG_SHA256SUM is not set
+# CONFIG_SHA512SUM is not set
+# CONFIG_SHA3SUM is not set
+# CONFIG_UUDECODE is not set
+# CONFIG_UUENCODE is not set
+# CONFIG_BASE32 is not set
+# CONFIG_DOS2UNIX is not set
+# CONFIG_UNIX2DOS is not set
+# CONFIG_EXPR is not set
+# CONFIG_FACTOR is not set
+# CONFIG_FOLD is not set
+# CONFIG_NL is not set
+# CONFIG_OD is not set
+# CONFIG_PASTE is not set
+# CONFIG_SEQ is not set
+# CONFIG_SORT is not set
+# CONFIG_TEE is not set
+# CONFIG_TR is not set
+# CONFIG_UNIQ is not set
+# CONFIG_SED is not set
+# CONFIG_EGREP is not set
+# CONFIG_FGREP is not set
+# CONFIG_XARGS is not set
+# CONFIG_XXD is not set
+# CONFIG_ASCII is not set
+# CONFIG_BC is not set
+# CONFIG_HEXEDIT is not set
+# CONFIG_MORE is not set
+# CONFIG_TS is not set
+# CONFIG_YES is not set
+# CONFIG_GETOPT is not set
+# CONFIG_WHICH is not set
+
+# Files, disks and devices that are not there
+# CONFIG_CHROOT is not set
+# CONFIG_CHGRP is not set
+# CONFIG_CHOWN is not set
+# CONFIG_DD is not set
+# CONFIG_DU is not set
+# CONFIG_INSTALL is not set
+# CONFIG_LINK is not set
+# CONFIG_UNLINK is not set
+# CONFIG_MKFIFO is not set
+# CONFIG_MKNOD is not set
+# CONFIG_READLINK is not set
+# CONFIG_REALPATH is not set
+# CONFIG_SHRED is not set
+# CONFIG_STTY is not set
+# CONFIG_TRUNCATE is not set
+# CONFIG_TTY is not set
+# CONFIG_USLEEP is not set
+# CONFIG_FALLOCATE is not set
+# CONFIG_FREERAMDISK is not set
+# CONFIG_FSFREEZE is not set
+# CONFIG_MKE2FS is not set
+# CONFIG_MKDOSFS is not set
+# CONFIG_SWAPON is not set
+# CONFIG_SWAPOFF is not set
+# CONFIG_VOLUMEID is not set
+# CONFIG_I2CTRANSFER is not set
+# CONFIG_LSSCSI is not set
+# CONFIG_MIM is not set
+# CONFIG_PARTPROBE is not set
+# CONFIG_SETFATTR is not set
+# CONFIG_SETSERIAL is not set
+# CONFIG_LINUX32 is not set
+# CONFIG_LINUX64 is not set
+# CONFIG_LINUXRC is not set
+# CONFIG_NUKE is not set
+# CONFIG_RESUME is not set
+# CONFIG_RUN_INIT is not set
+# CONFIG_RUN_PARTS is not set
+# CONFIG_START_STOP_DAEMON is not set
+# CONFIG_SVC is not set
+# CONFIG_SVOK is not set
+# CONFIG_KILLALL5 is not set
+
+# One user on one console: no accounts, no login
+# CONFIG_USE_BB_CRYPT is not set
+# CONFIG_ADDUSER is not set
+# CONFIG_GETTY is not set
+# CONFIG_LOGIN is not set
+# CONFIG_PASSWD is not set
+# CONFIG_NOLOGIN is not set
+# CONFIG_SETPRIV is not set
+# CONFIG_HOSTID is not set
+# CONFIG_ID is not set
+# CONFIG_LOGNAME is not set
+# CONFIG_WHO is not set
+# CONFIG_W is not set
+# CONFIG_MESG is not set
+# CONFIG_NICE is not set
+# CONFIG_NOHUP is not set
+# CONFIG_NPROC is not set
+
+# No network
+# CONFIG_DNSDOMAINNAME is not set
+# CONFIG_IFCONFIG is not set
+# CONFIG_IFUP is not set
+# CONFIG_IFDOWN is not set
+# CONFIG_IP is not set
+# CONFIG_IPADDR is not set
+# CONFIG_IPLINK is not set
+# CONFIG_IPROUTE is not set
+# CONFIG_NC is not set
+# CONFIG_NETSTAT is not set
+# CONFIG_PING is not set
+# CONFIG_ROUTE is not set
+# CONFIG_TELNET is not set
+# CONFIG_WGET is not set
+# CONFIG_UDHCPC is not set
+
+# The shell keeps conditions, loops, functions and job control, and loses the rest
+# CONFIG_HUSH_BASH_COMPAT is not set
+# CONFIG_HUSH_BRACE_EXPANSION is not set
+# CONFIG_HUSH_LINENO_VAR is not set
+# CONFIG_HUSH_SAVEHISTORY is not set
+# CONFIG_HUSH_RANDOM_SUPPORT is not set
+# CONFIG_HUSH_MODE_X is not set
+# CONFIG_HUSH_GETOPTS is not set
+# CONFIG_HUSH_ULIMIT is not set
+# CONFIG_HUSH_TIMES is not set
+# CONFIG_HUSH_TRAP is not set
+# CONFIG_HUSH_UMASK is not set

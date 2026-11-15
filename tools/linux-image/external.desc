@@ -1,0 +1,2 @@
+name: PULSAR
+desc: The Linux guest of the pulsar firmware (an emulated RV32IMA no-MMU machine)
