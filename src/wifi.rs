@@ -28,7 +28,9 @@
 //!   shows [`LinkState::Failed`], but retrying goes on, so the board reconnects when the router
 //!   comes back.
 //! - **RAM only.** The Wi-Fi driver is started without an NVS partition, so the password is
-//!   never copied into the plain `nvs` partition by ESP-IDF.
+//!   never copied into the plain `nvs` partition by ESP-IDF. That partition is still initialised
+//!   first, because the radio keeps its calibration data there (nothing secret): without it every
+//!   boot runs the full calibration again and logs a warning.
 //!
 //! # What this does not protect
 //!
@@ -48,6 +50,7 @@ use esp_idf_svc::ipv4::{
     DHCPClientSettings,
 };
 use esp_idf_svc::netif::{EspNetif, NetifConfiguration, NetifStack};
+use esp_idf_svc::nvs::EspDefaultNvsPartition;
 use esp_idf_svc::sys::EspError;
 use esp_idf_svc::wifi::{
     AuthMethod, BlockingWifi, ClientConfiguration, Configuration, EspWifi, ScanMethod,
@@ -210,7 +213,15 @@ pub fn start(
     credentials: &Credentials,
     status: SharedStatus,
 ) -> Result<(), Error> {
-    // No NVS partition: the driver then keeps its configuration (and the password) in RAM only.
+    // The radio stores its calibration data in ESP-IDF's own `nvs` partition, which must be
+    // initialised before the driver starts. Without it the radio runs the full calibration at
+    // every boot.
+    let radio_storage = EspDefaultNvsPartition::take()
+        .inspect_err(|error| log::warn!("no storage for the radio calibration: {error}"))
+        .ok();
+
+    // The driver itself gets no NVS partition (`None` below): it then keeps its configuration
+    // (and the password) in RAM only.
     let station = EspNetif::new_with_conf(&NetifConfiguration {
         ip_configuration: Some(IpConfiguration::Client(IpClientConfiguration::DHCP(
             DHCPClientSettings {
@@ -251,7 +262,11 @@ pub fn start(
     thread::Builder::new()
         .name("wifi".into())
         .stack_size(WIFI_STACK_BYTES)
-        .spawn(move || supervise(&mut wifi, &status))?;
+        .spawn(move || {
+            // Kept for as long as Wi-Fi runs, which is forever.
+            let _radio_storage = radio_storage;
+            supervise(&mut wifi, &status);
+        })?;
     Ok(())
 }
 

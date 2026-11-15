@@ -15,7 +15,7 @@ What it does:
 ## Requirements
 
 - A XIAO ESP32-C5 with a USB cable that carries data.
-- `rustup`. The file `rust-toolchain.toml` installs the pinned nightly and `rust-src`. The ESP32-C5 Rust target is tier 3, so it needs nightly and `build-std`.
+- `rustup`. The file `rust-toolchain.toml` installs the pinned nightly and `rust-src`. The ESP32-C5 Rust target is tier 3, so it needs nightly and `build-std`: the stable release has no standard library for it and cannot build one (the reasons are in `rust-toolchain.toml`).
 - `espflash` and `ldproxy`: `cargo install espflash ldproxy --locked`.
 - The ESP-IDF build prerequisites: `git`, `cmake`, `ninja`, `python3` with `venv` and `gzip`, and a C compiler for the host.
 
